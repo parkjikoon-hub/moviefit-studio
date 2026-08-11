@@ -104,7 +104,7 @@ python tools/make_icons.py    PWA 아이콘 다시 만들기
 
 ## 라이선스
 
-MIT License — [LICENSE](LICENSE) 참고.
+MIT License — [LICENSE](LICENSE) 참고. 외부 자산·상표 고지는 [NOTICE.md](NOTICE.md)에 정리했습니다.
 
 함께 들어 있는 **Pretendard** 글꼴은 SIL Open Font License 1.1로 배포됩니다
 ([원본](https://github.com/orioncactus/pretendard)).

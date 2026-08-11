@@ -19,14 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Third-party notices
-
-The Pretendard font, when downloaded into assets/fonts/ by tools/fetch_font.py,
-is distributed under the SIL Open Font License 1.1.
-Source: https://github.com/orioncactus/pretendard
-
-CapCut is a trademark of ByteDance Ltd. This project is not affiliated with,
-sponsored by, or endorsed by ByteDance.
