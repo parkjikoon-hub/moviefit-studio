@@ -1,4 +1,4 @@
-# TECH SPEC — SubCap Studio 기술 사양
+# TECH SPEC — MovieFit Studio 기술 사양
 
 버전 1.0 · 기술 결정의 기준 문서. 여기 명시된 스택·구조를 임의로 바꾸지 말 것 (변경이 필요하면 사용자에게 이유와 함께 제안).
 
@@ -44,7 +44,7 @@
 ## 4. 디렉터리 구조 (목표)
 
 ```
-subcap-studio/
+moviefit-studio/
 ├─ run.bat                  # 사용자용 실행 (서버 기동 + 브라우저 열기)
 ├─ requirements.txt
 ├─ CLAUDE.md / README.md / PROMPTS.md / docs/ / memory/

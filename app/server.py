@@ -12,20 +12,24 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.api import media as media_api
 from app.api import projects as projects_api
+from app.api import styles as styles_api
 from app.api import system as system_api
+from app.api import tts as tts_api
 from app.config import STATIC_DIR, ensure_dirs
 
-log = logging.getLogger("capcut_studio")
+log = logging.getLogger("moviefit_studio")
 
 
 def create_app() -> FastAPI:
     ensure_dirs()
 
-    app = FastAPI(title="CapCut Studio", version=__version__, docs_url="/api/docs")
+    app = FastAPI(title="MovieFit Studio", version=__version__, docs_url="/api/docs")
 
     app.include_router(projects_api.router)
     app.include_router(media_api.router)
     app.include_router(system_api.router)
+    app.include_router(styles_api.router)
+    app.include_router(tts_api.router)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

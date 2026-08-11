@@ -33,7 +33,7 @@ LICENSE_NOTE = """이 폴더의 폰트는 Pretendard입니다.
 - 라이선스: SIL Open Font License 1.1 (재배포·임베딩 허용)
 - 원본: https://github.com/orioncactus/pretendard
 
-CapCut Studio는 자막을 영상에 새겨 넣을 때 이 폰트를 사용합니다.
+MovieFit Studio는 자막을 영상에 새겨 넣을 때 이 폰트를 사용합니다.
 """
 
 
@@ -45,7 +45,7 @@ def download(name: str, url: str) -> bool:
 
     print(f"  받는 중… {name}")
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "capcut-studio/0.1"})
+        request = urllib.request.Request(url, headers={"User-Agent": "moviefit-studio/0.1"})
         with urllib.request.urlopen(request, timeout=60) as response:
             data = response.read()
     except (urllib.error.URLError, TimeoutError) as exc:

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import PROJECTS_DIR
+from app.core import style_map
 
 PROJECT_FILE = "project.json"
 SCHEMA_VERSION = 1
@@ -54,24 +55,20 @@ def default_project(name: str, video_path: str | None, mode: str) -> dict[str, A
         "mode": mode,  # "video" 또는 "script"
         "script": "",  # 대본 모드 원문
         "segments": [],
-        "style": {
-            "preset": "basic",
-            "font": "Pretendard",
-            "size": 42,
-            "color": "#FFFFFF",
-            "outline": {"color": "#000000", "width": 2},
-            "shadow": True,
-            "bg": {"enabled": False, "color": "#000000", "opacity": 0.5},
-            "position": "bottom",
-            "align": "center",
-        },
+        "style": style_map.apply_preset("basic"),
         "narration": {
             "gap": 0.3,
             "voice": "ko-KR-SunHiNeural",
+            "engine": "edge",
             "global_rate": "+0%",
+            "global_pitch": "+0Hz",
+            "global_volume": "+0%",
             "original_audio_volume": 30,
+            "ducking": False,
         },
         "stt": {"language": "ko", "model": "small"},
+        "dictionary": [],  # 자막 교정 규칙 (F-12)  [{"from": "피엘에스", "to": "PLS"}]
+        "read_dictionary": [],  # 나레이션 읽기 규칙  [{"from": "3D", "to": "쓰리디"}]
         "dictionary_applied": True,
         "created_at": _now_iso(),
         "updated_at": _now_iso(),

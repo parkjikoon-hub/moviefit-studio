@@ -120,7 +120,7 @@ def check_assets() -> None:
 def main() -> int:
     print()
     print("=" * 66)
-    print("  CapCut Studio 환경 점검")
+    print("  MovieFit Studio 환경 점검")
     print("=" * 66)
 
     print("\n[1] 파이썬")

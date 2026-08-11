@@ -1,6 +1,6 @@
-# CLAUDE.md — SubCap Studio 개발 에이전트 규칙
+# CLAUDE.md — MovieFit Studio 개발 에이전트 규칙
 
-이 프로젝트는 **SubCap Studio**: 영상 자막 자동 생성/편집과 AI 나레이션(TTS)에 특화된 로컬 웹앱을 만드는 프로젝트다. CapCut의 자막·나레이션 기능을 분석하여 그보다 사용성이 좋은 전용 도구를 만드는 것이 목표다. 요구사항은 `docs/PRD.md`, 기술 결정은 `docs/TECH_SPEC.md`, 화면은 `docs/UI_SPEC.md`, 개발 순서와 수용 기준은 `docs/ROADMAP.md`에 있다. 문서 간 충돌이 있으면 PRD > TECH_SPEC > UI_SPEC > ROADMAP 순으로 우선하되, 실질적 충돌은 임의로 해석하지 말고 사용자에게 물어라.
+이 프로젝트는 **MovieFit Studio**: 영상 자막 자동 생성/편집과 AI 나레이션(TTS)에 특화된 로컬 웹앱을 만드는 프로젝트다. CapCut의 자막·나레이션 기능을 분석하여 그보다 사용성이 좋은 전용 도구를 만드는 것이 목표다. 요구사항은 `docs/PRD.md`, 기술 결정은 `docs/TECH_SPEC.md`, 화면은 `docs/UI_SPEC.md`, 개발 순서와 수용 기준은 `docs/ROADMAP.md`에 있다. 문서 간 충돌이 있으면 PRD > TECH_SPEC > UI_SPEC > ROADMAP 순으로 우선하되, 실질적 충돌은 임의로 해석하지 말고 사용자에게 물어라.
 
 ## 사용자 프로필 (가장 중요)
 

@@ -1,4 +1,4 @@
-# CapCut Studio 실행에 필요한 파이썬 패키지 목록
+# MovieFit Studio 실행에 필요한 파이썬 패키지 목록
 # 설치: python -m pip install -r requirements.txt
 
 fastapi>=0.115          # 웹 서버 뼈대 (브라우저 화면에 데이터를 주고받는 역할)

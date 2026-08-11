@@ -1,6 +1,6 @@
 윈도우 한글 명령창은 기본 인코딩이 cp949라서, 파이썬 print에 '—'(em dash) 같은 문자를 넣으면 UnicodeEncodeError로 프로그램이 즉사한다.
 
-상황: `python -m app` 실행 시 시작 배너의 "CapCut Studio — 자막·나레이션 스튜디오"를 출력하다가
+상황: `python -m app` 실행 시 시작 배너의 "MovieFit Studio — 자막·나레이션 스튜디오"를 출력하다가
 `UnicodeEncodeError: 'cp949' codec can't encode character '—'` 로 서버가 뜨지도 못하고 종료됐다.
 한글 자체는 cp949에 있어서 통과하는데, 유니코드 기호(—, ·, ✓, → 등)에서만 터진다.
 그래서 "한글은 잘 나오는데?" 하고 방심하기 쉽다.

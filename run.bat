@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  CapCut Studio launcher
+REM  MovieFit Studio launcher
 REM
 REM  IMPORTANT: This file must stay ASCII-only.
 REM  cmd.exe cannot read Korean text inside a .bat file reliably
@@ -8,7 +8,7 @@ REM  (it garbles the lines and treats them as commands).
 REM  All Korean messages live in tools/launch.py instead.
 REM ============================================================
 chcp 65001 > nul
-title CapCut Studio
+title MovieFit Studio
 cd /d "%~dp0"
 
 python --version > nul 2>&1

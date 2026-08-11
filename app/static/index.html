@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CapCut Studio — 자막·나레이션 스튜디오</title>
+<title>MovieFit Studio — 자막·나레이션 스튜디오</title>
 <meta name="theme-color" content="#17181C">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/favicon.ico" sizes="any">
@@ -13,17 +13,16 @@
 </head>
 <body>
 
-<!-- ── 시작 화면 (UI_SPEC 2.1) ───────────────────────────────── -->
+<!-- ══ 시작 화면 ══════════════════════════════════════════ -->
 <section id="view-start" class="view">
   <div class="start-wrap">
     <header class="start-head">
       <img src="/icons/icon-192.png" alt="" class="start-logo" width="72" height="72">
-      <h1>CapCut Studio</h1>
+      <h1>MovieFit Studio</h1>
       <p class="sub">영상 자막을 자동으로 만들고, 대본으로 나레이션까지 —<br>내 컴퓨터 안에서만 처리됩니다.</p>
     </header>
 
-    <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
-         aria-label="영상 파일 선택">
+    <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="영상 파일 선택">
       <div class="drop-icon">＋</div>
       <div class="drop-title">영상 파일 선택하기</div>
       <div class="drop-desc">mp4 · mov · mkv · webm · mp3 · wav · m4a</div>
@@ -52,11 +51,11 @@
   </div>
 </section>
 
-<!-- ── 작업 화면 (UI_SPEC 1) ─────────────────────────────────── -->
+<!-- ══ 작업 화면 ══════════════════════════════════════════ -->
 <section id="view-editor" class="view" hidden>
 
   <header class="topbar">
-    <button id="btn-home" class="btn btn-icon" title="시작 화면으로">←</button>
+    <button id="btn-home" class="btn btn-icon" title="시작 화면으로 (저장하고 나갑니다)">←</button>
     <input id="project-name" class="project-name" type="text" aria-label="프로젝트 이름">
     <div class="mode-switch" role="tablist" aria-label="작업 모드">
       <button id="mode-video"  class="mode-btn" role="tab">영상 모드</button>
@@ -68,7 +67,7 @@
 
   <main class="workspace">
 
-    <!-- 좌 패널 -->
+    <!-- ── 좌 패널 ── -->
     <aside class="panel panel-left">
       <div id="left-video" class="panel-body">
         <h3>원본 영상</h3>
@@ -89,34 +88,62 @@
           </select>
         </label>
         <button id="btn-stt" class="btn btn-primary btn-wide">자막 자동 생성</button>
-        <p class="hint">Phase 1에서 연결됩니다. 지금은 화면 뼈대만 있습니다.</p>
+        <p class="hint">Phase 1에서 연결됩니다.</p>
+
+        <h3>자막을 대본으로</h3>
+        <button id="btn-to-script" class="btn btn-wide">자막 텍스트를 대본으로 옮기기</button>
+        <p class="hint">이미 만든 자막을 나레이션 대본으로 재사용합니다.</p>
       </div>
 
       <div id="left-script" class="panel-body" hidden>
         <h3>대본</h3>
         <textarea id="script-input" class="script-input"
                   placeholder="나레이션으로 만들 대본을 붙여넣으세요.&#10;문장 단위로 자동으로 나뉩니다."></textarea>
+        <div id="script-stats" class="script-stats">0자 · 문장 0개 · 예상 0초</div>
+        <button id="btn-split-script" class="btn btn-wide">문장 나누기 미리보기</button>
         <button id="btn-tts" class="btn btn-primary btn-wide">나레이션 생성</button>
         <p class="hint">Phase 2에서 연결됩니다.</p>
       </div>
     </aside>
 
-    <!-- 중앙 플레이어 -->
+    <!-- ── 중앙 플레이어 ── -->
     <section class="stage">
       <div class="video-wrap">
-        <video id="player" controls preload="metadata"></video>
-        <div id="overlay" class="subtitle-overlay" aria-live="off"></div>
-        <div id="no-video" class="no-video">영상이 없는 프로젝트입니다 (대본 모드)</div>
+        <div id="video-box" class="video-box">
+          <video id="player" preload="metadata"></video>
+          <div id="no-video" class="no-video">영상이 없는 프로젝트입니다 (대본 모드)</div>
+
+          <!-- 자막 오버레이: 마우스로 끌어서 위치를 바꿀 수 있다 -->
+          <div id="overlay" class="subtitle-overlay" role="button" tabindex="0"
+               title="끌어서 자막 위치를 옮길 수 있습니다"></div>
+
+          <!-- 안전 영역 안내선 (쇼츠 UI에 가려지는 부분) -->
+          <div id="safe-area" class="safe-area" hidden></div>
+          <div id="drag-readout" class="drag-readout" hidden></div>
+        </div>
       </div>
+
       <div class="transport">
         <button id="btn-play" class="btn btn-icon" title="재생/일시정지 (Space)">▶</button>
+        <button id="btn-prev-seg" class="btn btn-icon" title="이전 자막 (↑)">⏮</button>
+        <button id="btn-next-seg" class="btn btn-icon" title="다음 자막 (↓)">⏭</button>
         <span id="time-now" class="time">00:00.0</span>
         <span class="time-sep">/</span>
         <span id="time-total" class="time">00:00.0</span>
+        <label class="speed-wrap">배속
+          <select id="playback-rate">
+            <option value="0.5">0.5x</option>
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+          </select>
+        </label>
+        <label class="chk"><input type="checkbox" id="chk-safe-area"> 안전 영역 표시</label>
       </div>
     </section>
 
-    <!-- 우 패널 -->
+    <!-- ── 우 패널 ── -->
     <aside class="panel panel-right">
       <div class="tabs" role="tablist">
         <button class="tab-btn is-active" data-tab="style" role="tab">스타일</button>
@@ -124,61 +151,226 @@
         <button class="tab-btn" data-tab="dict" role="tab">사전</button>
       </div>
 
+      <!-- 스타일 탭 -->
       <div class="panel-body tab-page" data-page="style">
         <h3>프리셋</h3>
-        <div class="preset-grid">
-          <button class="preset" data-preset="basic">기본</button>
-          <button class="preset" data-preset="variety">예능</button>
-          <button class="preset" data-preset="news">뉴스</button>
-          <button class="preset" data-preset="minimal">미니멀</button>
-          <button class="preset" data-preset="accent">강조</button>
+        <div id="preset-grid" class="preset-grid"></div>
+        <div class="row-2">
+          <input id="preset-name" type="text" placeholder="내 프리셋 이름">
+          <button id="btn-save-preset" class="btn btn-tiny">저장</button>
         </div>
-        <label class="field">글자 크기 <input id="style-size" type="range" min="20" max="80" value="42"></label>
-        <label class="field">글자 색 <input id="style-color" type="color" value="#FFFFFF"></label>
-        <label class="field">위치
-          <select id="style-position">
-            <option value="bottom">아래</option>
-            <option value="middle">가운데</option>
-            <option value="top">위</option>
-          </select>
+
+        <h3>글꼴</h3>
+        <label class="field">글꼴 <select id="style-font"></select></label>
+        <div class="row-2">
+          <label class="field">크기 <input id="style-size" type="number" min="12" max="120" step="1"></label>
+          <label class="field">자간 <input id="style-spacing" type="number" min="-5" max="20" step="0.5"></label>
+        </div>
+        <div class="row-2">
+          <label class="field">줄 간격 <input id="style-lineheight" type="number" min="1" max="2.5" step="0.05"></label>
+          <label class="field">정렬
+            <select id="style-align">
+              <option value="left">왼쪽</option>
+              <option value="center">가운데</option>
+              <option value="right">오른쪽</option>
+            </select>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <button id="style-bold" class="toggle" title="굵게"><b>가</b> 굵게</button>
+          <button id="style-italic" class="toggle" title="기울임"><i>가</i> 기울임</button>
+        </div>
+
+        <h3>색과 테두리</h3>
+        <div class="row-2">
+          <label class="field">글자색 <input id="style-color" type="color"></label>
+          <label class="field">외곽선색 <input id="style-outline-color" type="color"></label>
+        </div>
+        <label class="field">외곽선 두께 <span id="outline-val" class="val">2.0</span>
+          <input id="style-outline-width" type="range" min="0" max="8" step="0.5">
         </label>
-        <p class="hint">Phase 3에서 번인 결과까지 연결됩니다.</p>
+        <label class="chk"><input type="checkbox" id="style-shadow"> 그림자</label>
+        <label class="field">그림자 깊이 <span id="shadow-val" class="val">1.5</span>
+          <input id="style-shadow-depth" type="range" min="0" max="8" step="0.5">
+        </label>
+
+        <h3>배경 박스</h3>
+        <label class="chk"><input type="checkbox" id="style-bg"> 자막 뒤에 배경 깔기</label>
+        <div class="row-2">
+          <label class="field">배경색 <input id="style-bg-color" type="color"></label>
+          <label class="field">투명도 <span id="bgop-val" class="val">0.55</span>
+            <input id="style-bg-opacity" type="range" min="0" max="1" step="0.05">
+          </label>
+        </div>
+
+        <h3>위치</h3>
+        <div class="pos-preset">
+          <button class="pos-btn" data-pos="top">위</button>
+          <button class="pos-btn" data-pos="middle">가운데</button>
+          <button class="pos-btn" data-pos="bottom">아래</button>
+        </div>
+        <p class="hint">플레이어의 자막을 <b>마우스로 끌면</b> 원하는 자리에 놓을 수 있습니다.</p>
+        <div class="row-2">
+          <label class="field">가로 % <input id="style-pos-x" type="number" min="0" max="100" step="0.5"></label>
+          <label class="field">세로 % <input id="style-pos-y" type="number" min="0" max="100" step="0.5"></label>
+        </div>
+        <button id="btn-pos-reset" class="btn btn-tiny btn-wide">기본 위치로 되돌리기</button>
+
+        <h3>줄바꿈 규칙</h3>
+        <div class="row-2">
+          <label class="field">한 줄 최대 글자 <input id="style-maxchars" type="number" min="8" max="40"></label>
+          <label class="field">최대 줄 수 <input id="style-maxlines" type="number" min="1" max="3"></label>
+        </div>
       </div>
 
+      <!-- 나레이션 탭 -->
       <div class="panel-body tab-page" data-page="narration" hidden>
-        <h3>음성</h3>
-        <label class="field">목소리
-          <select id="tts-voice">
-            <option value="ko-KR-SunHiNeural">한국어 · 여성 (SunHi)</option>
-            <option value="ko-KR-InJoonNeural">한국어 · 남성 (InJoon)</option>
-            <option value="en-US-JennyNeural">English · Female (Jenny)</option>
-            <option value="en-US-GuyNeural">English · Male (Guy)</option>
+        <h3>목소리 고르기</h3>
+        <div class="row-2">
+          <input id="voice-search" type="search" placeholder="이름·언어로 검색">
+          <select id="voice-filter">
+            <option value="korean">한국어 가능</option>
+            <option value="ko">한국어 전용</option>
+            <option value="all">전체 언어</option>
           </select>
+        </div>
+        <div id="voice-count" class="voice-count">불러오는 중…</div>
+        <div id="voice-list" class="voice-list"></div>
+
+        <h3>말하기 조절</h3>
+        <label class="field">속도 <span id="rate-val" class="val">+0%</span>
+          <input id="tts-rate" type="range" min="-50" max="50" step="5" value="0">
         </label>
-        <label class="field">문장 간 간격(초) <input id="tts-gap" type="number" step="0.1" min="0" max="3" value="0.3"></label>
-        <label class="field">원본 소리 볼륨(%) <input id="tts-volume" type="number" step="5" min="0" max="100" value="30"></label>
-        <p class="hint">Phase 2에서 연결됩니다.</p>
+        <label class="field">높낮이 <span id="pitch-val" class="val">+0Hz</span>
+          <input id="tts-pitch" type="range" min="-50" max="50" step="5" value="0">
+        </label>
+        <label class="field">크기 <span id="vol-val" class="val">+0%</span>
+          <input id="tts-volume" type="range" min="-50" max="50" step="5" value="0">
+        </label>
+        <label class="field">문장 사이 간격(초) <input id="tts-gap" type="number" step="0.1" min="0" max="3"></label>
+
+        <h3>영상과 섞기</h3>
+        <label class="field">원본 소리 볼륨(%) <input id="tts-origvol" type="number" step="5" min="0" max="100"></label>
+        <label class="chk"><input type="checkbox" id="tts-ducking"> 말할 때 원본 소리 자동으로 줄이기</label>
+
+        <h3>내 목소리로 나레이션</h3>
+        <div class="myvoice-box">
+          <p class="hint">내 목소리를 짧게 녹음해 두면 그 목소리로 나레이션을 만듭니다.
+            <b>본인 목소리만 등록해 주세요.</b></p>
+          <button id="btn-record-voice" class="btn btn-wide">내 목소리 녹음하기</button>
+          <div id="myvoice-status" class="hint">아직 등록된 목소리가 없습니다.</div>
+        </div>
       </div>
 
+      <!-- 사전 탭 -->
       <div class="panel-body tab-page" data-page="dict" hidden>
-        <h3>사용자 사전</h3>
-        <p class="hint">자주 틀리는 단어를 등록하면 자막 생성 직후 자동으로 고쳐집니다. Phase 3.</p>
+        <h3>자막 교정 사전</h3>
+        <p class="hint">음성인식이 자주 틀리는 단어를 등록하면 자막 생성 직후 자동으로 고쳐집니다.
+          예: 피엘에스 → PLS</p>
+        <div class="row-2">
+          <input id="dict-from" type="text" placeholder="틀리게 나오는 말">
+          <input id="dict-to" type="text" placeholder="바른 표기">
+        </div>
+        <button id="btn-dict-add" class="btn btn-tiny btn-wide">규칙 추가</button>
+        <ul id="dict-list" class="dict-list"></ul>
+
+        <h3>나레이션 읽기 사전</h3>
+        <p class="hint">숫자·영어를 어떻게 읽을지 정합니다. 예: 3D → 쓰리디</p>
+        <div class="row-2">
+          <input id="read-from" type="text" placeholder="쓰여 있는 대로">
+          <input id="read-to" type="text" placeholder="읽는 대로">
+        </div>
+        <button id="btn-read-add" class="btn btn-tiny btn-wide">규칙 추가</button>
+        <ul id="read-list" class="dict-list"></ul>
       </div>
     </aside>
   </main>
 
-  <!-- 하단 세그먼트 편집기 -->
-  <section class="segments">
-    <div class="seg-toolbar">
-      <input id="seg-search" type="search" placeholder="자막 검색 (Ctrl+F)">
-      <button id="btn-seg-add" class="btn btn-tiny">＋ 추가</button>
-      <span id="seg-count" class="seg-count">0개</span>
+  <!-- ══ 하단: 타임라인 + 목록 편집기 ══════════════════════ -->
+  <section class="bottom">
+
+    <!-- 타임라인 띠 -->
+    <div class="timeline-wrap">
+      <div class="tl-side">
+        <span class="tl-label">자막 트랙</span>
+        <div class="tl-zoom">
+          <button id="tl-zoom-out" class="btn btn-icon" title="축소">－</button>
+          <button id="tl-zoom-in" class="btn btn-icon" title="확대">＋</button>
+          <button id="tl-zoom-fit" class="btn btn-tiny" title="전체 보기">전체</button>
+        </div>
+      </div>
+      <div id="tl-scroll" class="tl-scroll">
+        <div id="tl-inner" class="tl-inner">
+          <div id="tl-ruler" class="tl-ruler"></div>
+          <div id="tl-track" class="tl-track"></div>
+          <div id="tl-playhead" class="tl-playhead"></div>
+        </div>
+      </div>
     </div>
-    <ul id="seg-list" class="seg-list">
-      <li class="empty">아직 자막이 없습니다. 왼쪽에서 [자막 자동 생성]을 누르거나 대본 모드로 시작하세요.</li>
-    </ul>
+
+    <!-- 목록 편집기 -->
+    <div class="segments">
+      <div class="seg-toolbar">
+        <div class="seg-search-wrap">
+          <input id="seg-search" type="search" placeholder="자막 검색  (Ctrl+F)">
+          <input id="seg-replace" type="text" placeholder="바꿀 말" hidden>
+          <button id="btn-replace-all" class="btn btn-tiny" hidden>모두 바꾸기</button>
+          <button id="btn-toggle-replace" class="btn btn-tiny">바꾸기</button>
+        </div>
+
+        <span class="tb-sep"></span>
+
+        <button id="btn-seg-add" class="btn btn-tiny"><span class="ic">＋</span> 자막 추가</button>
+        <button id="btn-undo" class="btn btn-tiny" disabled><span class="ic">↶</span> 되돌리기</button>
+        <button id="btn-redo" class="btn btn-tiny" disabled><span class="ic">↷</span> 다시하기</button>
+        <button id="btn-shift-all" class="btn btn-tiny"><span class="ic">⇄</span> 전체 시간 밀기</button>
+        <button id="btn-check" class="btn btn-tiny"><span class="ic">✓</span> 자막 검사</button>
+        <button id="btn-help" class="btn btn-tiny"><span class="ic">?</span> 사용법</button>
+
+        <span id="seg-count" class="seg-count">0개</span>
+      </div>
+
+      <!-- 상황에 따라 바뀌는 한 줄 안내 -->
+      <div id="help-bar" class="help-bar">자막을 클릭하면 그 시점으로 이동합니다.</div>
+
+      <ul id="seg-list" class="seg-list"></ul>
+    </div>
   </section>
 </section>
+
+<!-- 처음 한 번만 뜨는 사용법 안내 -->
+<div id="coach" class="coach" hidden>
+  <div class="coach-card">
+    <h3>편집기 사용법 — 30초면 끝납니다</h3>
+    <ol class="coach-list">
+      <li><b>글자 고치기</b> — 자막 글을 그냥 클릭하면 바로 수정됩니다. Enter로 확정.</li>
+      <li><b>시간 조절</b> — 시작·끝 시간 옆의 <span class="kbd">◀</span><span class="kbd">▶</span> 버튼이 0.1초씩 옮깁니다. 숫자를 클릭하면 직접 입력할 수 있습니다.</li>
+      <li><b>나누기·합치기</b> — 글 중간에 커서를 두고 <span class="kbd">나누기</span>를 누르면 두 개로 쪼개집니다. <span class="kbd">합치기</span>는 다음 자막과 붙입니다.</li>
+      <li><b>실수해도 괜찮습니다</b> — 위의 <span class="kbd">↶ 되돌리기</span> 버튼으로 언제든 되돌릴 수 있습니다.</li>
+    </ol>
+    <label class="chk"><input type="checkbox" id="coach-dont-show" checked> 다음부터 보지 않기</label>
+    <button id="coach-close" class="btn btn-primary btn-wide">알겠어요, 시작할게요</button>
+  </div>
+</div>
+
+<!-- 단축키 도움말 -->
+<div id="shortcuts" class="coach" hidden>
+  <div class="coach-card">
+    <h3>단축키</h3>
+    <table class="kbd-table">
+      <tr><td><span class="kbd">Space</span></td><td>재생 / 일시정지</td></tr>
+      <tr><td><span class="kbd">←</span> <span class="kbd">→</span></td><td>1초 이동 (Shift와 함께 누르면 0.1초)</td></tr>
+      <tr><td><span class="kbd">↑</span> <span class="kbd">↓</span></td><td>이전 / 다음 자막 선택</td></tr>
+      <tr><td><span class="kbd">Enter</span></td><td>선택한 자막 글 고치기 시작</td></tr>
+      <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Enter</span></td><td>글 수정 중 커서 위치에서 나누기</td></tr>
+      <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Z</span></td><td>되돌리기</td></tr>
+      <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Y</span></td><td>다시하기</td></tr>
+      <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">F</span></td><td>자막 검색</td></tr>
+      <tr><td><span class="kbd">Delete</span></td><td>선택한 자막 삭제</td></tr>
+    </table>
+    <button id="shortcuts-close" class="btn btn-primary btn-wide">닫기</button>
+  </div>
+</div>
 
 <div id="toast" class="toast" hidden></div>
 

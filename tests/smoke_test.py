@@ -70,7 +70,7 @@ def as_json(raw: bytes) -> dict:
 
 def main() -> int:
     print("\n" + "=" * 66)
-    print("  CapCut Studio 동작 점검")
+    print("  MovieFit Studio 동작 점검")
     print("=" * 66)
 
     # ── 서버 연결 ────────────────────────────────────────

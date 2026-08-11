@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MovieFit Studio — 무료 자막 자동 생성 · AI 나레이션 도구</title>
+<meta name="description" content="영상을 넣으면 자막을 자동으로 만들고, 대본을 넣으면 AI 나레이션과 완벽히 동기화된 자막을 만들어 주는 무료 윈도우용 도구. 내 컴퓨터에서만 처리되고, 워터마크도 계정도 없습니다.">
+<meta name="theme-color" content="#17181C">
+<link rel="icon" href="icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="ko_KR">
+<meta property="og:site_name" content="MovieFit Studio">
+<meta property="og:title" content="MovieFit Studio — 무료 자막 자동 생성 · AI 나레이션 도구">
+<meta property="og:description" content="영상을 넣으면 자막을 자동으로 만들고, 대본을 넣으면 AI 나레이션과 완벽히 동기화된 자막을 만들어 주는 무료 윈도우용 도구. 내 컴퓨터에서만 처리됩니다.">
+<meta property="og:image" content="icons/icon-512.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="MovieFit Studio — 무료 자막 자동 생성 · AI 나레이션 도구">
+<meta name="twitter:description" content="자막 자동 생성과 AI 나레이션을 한 화면에서. 무료, 워터마크 없음, 로컬 처리.">
+<meta name="twitter:image" content="icons/icon-512.png">
+<style>
+:root{
+  --bg:#17181C;
+  --surface:#1E2026;
+  --surface-2:#262932;
+  --border:#33373F;
+  --text:#E8EAED;
+  --dim:#9AA0AA;
+  --accent:#2DD4BF;
+  --accent-dark:#14B8A6;
+  --radius:14px;
+  --maxw:1080px;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:"Pretendard","Malgun Gothic",system-ui,sans-serif;
+  font-size:17px;
+  line-height:1.75;
+  letter-spacing:-0.01em;
+  overflow-x:hidden;
+  word-break:keep-all;
+}
+img{max-width:100%;height:auto;display:block;}
+a{color:var(--accent);text-decoration:none;}
+a:hover{text-decoration:underline;}
+:focus-visible{
+  outline:3px solid var(--accent);
+  outline-offset:3px;
+  border-radius:6px;
+}
+h1,h2,h3{line-height:1.35;margin:0;letter-spacing:-0.02em;}
+p{margin:0;}
+ul{margin:0;padding:0;list-style:none;}
+code{
+  font-family:"Consolas","D2Coding",ui-monospace,monospace;
+  font-size:0.92em;
+  background:var(--surface-2);
+  border:1px solid var(--border);
+  color:#BDF5EC;
+  border-radius:8px;
+  padding:2px 7px;
+  overflow-wrap:anywhere;
+  white-space:pre-wrap;
+}
+code.block{
+  display:block;
+  padding:12px 14px;
+  margin-top:10px;
+  line-height:1.6;
+}
+
+.wrap{width:100%;max-width:var(--maxw);margin:0 auto;padding:0 20px;}
+.section{padding:72px 0;border-top:1px solid var(--border);}
+.section:first-of-type{border-top:none;}
+.eyebrow{
+  color:var(--accent);
+  font-size:0.82rem;
+  font-weight:700;
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  margin-bottom:12px;
+}
+.section h2{font-size:clamp(1.5rem,4.2vw,2.05rem);margin-bottom:12px;}
+.section .lead{color:var(--dim);max-width:62ch;margin-bottom:36px;}
+
+/* ── 헤더 ── */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:rgba(23,24,28,0.88);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.topbar .wrap{display:flex;align-items:center;gap:14px;height:60px;}
+.brand{display:flex;align-items:center;gap:10px;color:var(--text);font-weight:700;}
+.brand:hover{text-decoration:none;}
+.brand img{width:28px;height:28px;border-radius:7px;}
+.topbar nav{margin-left:auto;display:flex;gap:8px;align-items:center;}
+.topbar nav a{
+  color:var(--dim);font-size:0.93rem;padding:6px 10px;border-radius:8px;
+}
+.topbar nav a:hover{color:var(--text);background:var(--surface-2);text-decoration:none;}
+.nav-hide{display:none;}
+@media (min-width:640px){.nav-hide{display:inline-block;}}
+
+/* ── 히어로 ── */
+.hero{padding:64px 0 76px;text-align:center;}
+.hero-logo{
+  width:104px;height:104px;margin:0 auto 24px;border-radius:26px;
+  border:1px solid var(--border);background:var(--surface);
+  box-shadow:0 12px 40px rgba(45,212,191,0.14);
+}
+.hero h1{font-size:clamp(2rem,7vw,3.1rem);margin-bottom:8px;}
+.hero h1 .accent{color:var(--accent);}
+.hero .tagline{
+  color:var(--dim);font-size:clamp(1rem,2.6vw,1.18rem);
+  max-width:44ch;margin:0 auto 10px;
+}
+.hero .sub{color:var(--dim);font-size:0.95rem;max-width:52ch;margin:0 auto 30px;}
+.btnrow{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:13px 26px;border-radius:11px;font-weight:700;font-size:1rem;
+  border:1px solid transparent;cursor:pointer;transition:transform .12s ease,background .12s ease;
+}
+.btn:hover{text-decoration:none;transform:translateY(-1px);}
+.btn-primary{background:var(--accent);color:#0C1A18;}
+.btn-primary:hover{background:var(--accent-dark);}
+.btn-secondary{background:var(--surface-2);color:var(--text);border-color:var(--border);}
+.btn-secondary:hover{background:#2F333E;}
+.badges{
+  display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:26px;
+}
+.badge{
+  font-size:0.83rem;color:var(--dim);
+  border:1px solid var(--border);background:var(--surface);
+  border-radius:999px;padding:5px 13px;
+}
+.badge b{color:var(--accent);font-weight:700;}
+
+/* ── 카드 그리드 ── */
+.grid{display:grid;gap:18px;}
+.grid-3{grid-template-columns:1fr;}
+@media (min-width:760px){.grid-3{grid-template-columns:repeat(3,1fr);}}
+.grid-2{grid-template-columns:1fr;}
+@media (min-width:760px){.grid-2{grid-template-columns:repeat(2,1fr);}}
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:26px 24px;
+}
+.card h3{font-size:1.12rem;margin-bottom:10px;}
+.card p{color:var(--dim);font-size:0.96rem;}
+.card .num{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border-radius:10px;margin-bottom:14px;
+  background:rgba(45,212,191,0.13);color:var(--accent);
+  font-weight:800;font-size:0.95rem;
+}
+
+/* ── 기능 목록 ── */
+.feat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;}
+.feat h3{font-size:1.05rem;margin-bottom:14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.feat li{
+  display:flex;gap:10px;align-items:flex-start;
+  color:var(--dim);font-size:0.95rem;padding:5px 0;
+}
+.feat li::before{content:"—";color:var(--accent);flex:none;}
+.tag{
+  font-size:0.72rem;font-weight:700;letter-spacing:0.02em;
+  border-radius:999px;padding:2px 9px;border:1px solid var(--border);
+  color:var(--dim);background:var(--surface-2);
+}
+.tag.now{color:var(--accent);border-color:rgba(45,212,191,0.4);background:rgba(45,212,191,0.1);}
+.note{
+  margin-top:20px;color:var(--dim);font-size:0.9rem;
+  background:var(--surface-2);border:1px solid var(--border);
+  border-left:3px solid var(--accent);
+  border-radius:10px;padding:14px 16px;
+}
+
+/* ── 설치 단계 ── */
+.steps{counter-reset:step;display:grid;gap:16px;}
+.step{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:22px 24px;
+  position:relative;padding-left:70px;
+}
+.step::before{
+  counter-increment:step;content:counter(step);
+  position:absolute;left:22px;top:22px;
+  width:32px;height:32px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--accent);color:#0C1A18;font-weight:800;font-size:0.95rem;
+}
+.step h3{font-size:1.05rem;margin-bottom:8px;}
+.step p{color:var(--dim);font-size:0.95rem;}
+.step .warn{color:#F5D775;font-weight:600;}
+@media (max-width:480px){
+  .step{padding-left:24px;padding-top:66px;}
+}
+
+/* ── FAQ ── */
+.faq{display:grid;gap:12px;}
+details{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:0 22px;
+}
+details[open]{background:var(--surface-2);}
+summary{
+  cursor:pointer;list-style:none;padding:18px 0;
+  font-weight:700;font-size:1rem;
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+}
+summary::-webkit-details-marker{display:none;}
+summary::after{
+  content:"+";color:var(--accent);font-size:1.35rem;font-weight:400;flex:none;line-height:1;
+}
+details[open] summary::after{content:"\2212";}
+details .answer{color:var(--dim);font-size:0.96rem;padding:0 0 20px;margin-top:-4px;}
+
+/* ── CTA ── */
+.cta{
+  text-align:center;background:var(--surface);
+  border:1px solid var(--border);border-radius:20px;padding:48px 24px;
+}
+.cta h2{font-size:clamp(1.4rem,4vw,1.9rem);margin-bottom:10px;}
+.cta p{color:var(--dim);margin-bottom:26px;}
+
+/* ── 푸터 ── */
+footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);font-size:0.9rem;}
+.footlinks{display:flex;flex-wrap:wrap;gap:8px 18px;margin-bottom:16px;align-items:center;}
+.disclaimer{font-size:0.85rem;line-height:1.7;max-width:70ch;}
+.skip{
+  position:absolute;left:-9999px;top:0;
+  background:var(--accent);color:#0C1A18;padding:10px 16px;
+  border-radius:0 0 10px 0;font-weight:700;z-index:100;
+}
+.skip:focus{left:0;}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <img src="icons/icon-192.png" alt="" width="28" height="28">
+      <span>MovieFit Studio</span>
+    </a>
+    <nav aria-label="주요 메뉴">
+      <a class="nav-hide" href="#features">기능</a>
+      <a href="#install">설치 방법</a>
+      <a class="nav-hide" href="#faq">FAQ</a>
+      <a href="https://github.com/parkjikoon-hub/moviefit-studio">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- 1. 히어로 -->
+  <section class="hero" id="top">
+    <div class="wrap">
+      <img class="hero-logo" src="icons/icon-192.png" alt="MovieFit Studio 로고" width="104" height="104">
+      <h1>MovieFit <span class="accent">Studio</span></h1>
+      <p class="tagline">영상에서 자막을 자동으로 뽑고, 대본에서 나레이션과 자막을 한 번에 만드는 무료 윈도우용 도구.</p>
+      <p class="sub">설치해서 <code>run.bat</code>을 더블클릭하면 브라우저에 작업 화면이 열립니다. 회원가입도, 결제도, 워터마크도 없습니다.</p>
+      <div class="btnrow">
+        <a class="btn btn-primary" href="https://github.com/parkjikoon-hub/moviefit-studio">GitHub에서 내려받기</a>
+        <a class="btn btn-secondary" href="#install">사용법 보기</a>
+      </div>
+      <ul class="badges">
+        <li class="badge"><b>무료</b> · 오픈소스</li>
+        <li class="badge">워터마크 <b>없음</b></li>
+        <li class="badge">영상은 <b>내 컴퓨터에서만</b> 처리</li>
+        <li class="badge">계정 <b>불필요</b></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 2. 왜 만들었나 / 핵심 3가지 -->
+  <section class="section" id="why">
+    <div class="wrap">
+      <p class="eyebrow">왜 만들었나</p>
+      <h2>자막과 나레이션, 이 두 가지만 제대로 하는 도구</h2>
+      <p class="lead">영상 편집기는 기능이 많은 대신, 자막을 고치고 나레이션을 붙이는 일상적인 작업이 오히려 번거롭습니다. MovieFit Studio는 영상 편집기가 아닙니다. 자막과 나레이션 두 가지 작업만 남기고 나머지를 모두 걷어낸 전용 도구입니다.</p>
+      <ul class="grid grid-3">
+        <li class="card">
+          <span class="num" aria-hidden="true">1</span>
+          <h3>자막을 문서처럼 편집</h3>
+          <p>타임라인에서 클립을 하나씩 클릭하는 대신, 전체 자막을 한 화면 목록으로 봅니다. 글자를 바로 고치고, 찾기·바꾸기로 잘못 인식된 단어를 한 번에 정리하고, 시작·끝 시간은 ±0.1초 버튼으로 정확히 맞춥니다.</p>
+        </li>
+        <li class="card">
+          <span class="num" aria-hidden="true">2</span>
+          <h3>나레이션과 자막이 자동으로 맞춰짐</h3>
+          <p>대본을 붙여넣으면 문장마다 나레이션 음성을 만들고, <strong>그 음성의 실제 길이를 재서</strong> 자막 시간을 계산합니다. 소리와 자막이 어긋날 일이 구조적으로 없습니다. 손으로 싱크를 맞추지 않아도 됩니다.</p>
+        </li>
+        <li class="card">
+          <span class="num" aria-hidden="true">3</span>
+          <h3>내 컴퓨터에서만 처리</h3>
+          <p>음성 인식은 컴퓨터 안에서 도는 Whisper 모델이 담당합니다. 영상과 오디오 파일은 어디로도 올라가지 않습니다. 업로드를 기다릴 필요도, 남의 서버에 내 영상을 맡길 일도 없습니다.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 3. 기능 목록 -->
+  <section class="section" id="features">
+    <div class="wrap">
+      <p class="eyebrow">기능</p>
+      <h2>무엇을 할 수 있나</h2>
+      <p class="lead">현재 개발이 진행 중인 프로젝트입니다. 이미 동작하는 항목과 계획된 항목을 구분해 표시했습니다.</p>
+      <div class="grid grid-2">
+
+        <div class="feat">
+          <h3>영상 → 자막 <span class="tag now">개발 중</span></h3>
+          <ul>
+            <li>영상(mp4·mov·mkv·webm)과 오디오(mp3·wav·m4a) 불러오기</li>
+            <li>컴퓨터 안에서 도는 Whisper로 자동 음성 인식 (한국어·영어·자동 감지)</li>
+            <li>정확도 선택: 빠름 / 정확 — 예상 소요 시간 안내와 진행률 표시</li>
+            <li>문장 부호와 글자 수 기준으로 자막을 알맞게 끊어 줌</li>
+            <li>작업 내용 자동 저장 — 프로그램을 껐다 켜도 그대로 남습니다</li>
+          </ul>
+        </div>
+
+        <div class="feat">
+          <h3>자막 편집기 <span class="tag now">개발 중</span></h3>
+          <ul>
+            <li>목록에서 글자를 바로 고치는 인라인 편집</li>
+            <li>세그먼트 추가·삭제·병합, 커서 위치 기준 분할</li>
+            <li>시작·끝 시간 ±0.1초 넛지 버튼과 직접 입력</li>
+            <li>목록의 한 줄을 클릭하면 영상이 그 시점으로 이동</li>
+            <li>재생 중인 자막이 화면 위에 실시간으로 표시</li>
+            <li><span class="tag">계획</span> 찾기·바꾸기, 실행 취소/다시 실행(Ctrl+Z/Y)</li>
+            <li><span class="tag">계획</span> 사용자 사전 — 자주 틀리는 고유명사 자동 교정</li>
+          </ul>
+        </div>
+
+        <div class="feat">
+          <h3>AI 나레이션 (TTS) <span class="tag now">개발 중</span></h3>
+          <ul>
+            <li>대본 붙여넣기 → 문장별로 나누어 음성 생성</li>
+            <li>마이크로소프트 Edge 신경망 음성 사용 (한국어·영어, 무료)</li>
+            <li>음성 3초 미리듣기, 전체 속도 조절, 문장 사이 간격 설정</li>
+            <li><strong>자막 시간 자동 계산</strong> — 각 문장 음성의 실제 길이 기준</li>
+            <li><span class="tag">계획</span> 한 문장만 고쳐서 그 문장만 다시 생성 (이후 시간 자동 재계산)</li>
+            <li><span class="tag">계획</span> 만든 자막을 나레이션용 대본으로 바로 전환</li>
+          </ul>
+        </div>
+
+        <div class="feat">
+          <h3>내보내기 <span class="tag now">개발 중</span></h3>
+          <ul>
+            <li>SRT 자막 파일 — 유튜브·프리미어 등 다른 도구에서 그대로 사용</li>
+            <li>자막을 영상에 새겨 넣은 mp4 (한글 폰트 포함)</li>
+            <li>나레이션 오디오 단독 저장 (mp3 / wav)</li>
+            <li>영상에 나레이션 입히기 — 원본 소리 볼륨 0~100% 조절</li>
+            <li><span class="tag">계획</span> VTT 내보내기, SRT·VTT 가져오기</li>
+            <li><span class="tag">계획</span> 진행률 표시와 완료 후 저장 폴더 열기</li>
+          </ul>
+        </div>
+
+        <div class="feat">
+          <h3>자막 스타일 <span class="tag">계획</span></h3>
+          <ul>
+            <li>프리셋 5종: 기본 / 예능 / 뉴스 하단바 / 미니멀 / 강조</li>
+            <li>폰트·크기·색·외곽선·그림자·반투명 배경 박스</li>
+            <li>자막 위치(위·가운데·아래)와 정렬</li>
+            <li>바꾸는 즉시 미리보기 화면에 반영, 내 프리셋으로 저장</li>
+          </ul>
+        </div>
+
+        <div class="feat">
+          <h3>만들지 않는 것</h3>
+          <ul>
+            <li>컷 편집·전환·필터·스티커 등 일반 영상 편집 기능</li>
+            <li>클라우드 협업, 계정 시스템, 모바일 앱</li>
+            <li>다른 편집 프로그램의 프로젝트 파일 호환</li>
+          </ul>
+          <p class="note">기능을 줄이는 것이 이 프로젝트의 설계 의도입니다. 자막과 나레이션 작업이 두 번의 클릭 안에 끝나도록 화면을 평평하게 유지합니다.</p>
+        </div>
+
+      </div>
+      <p class="note">현재 상태: 뼈대 단계를 마치고 자막 생성·편집과 나레이션 기능을 순서대로 만들고 있습니다. 최신 진행 상황은 GitHub 저장소의 <code>docs/ROADMAP.md</code>에서 확인하실 수 있습니다.</p>
+    </div>
+  </section>
+
+  <!-- 4. 설치 방법 -->
+  <section class="section" id="install">
+    <div class="wrap">
+      <p class="eyebrow">설치 방법</p>
+      <h2>윈도우에서 4단계로 시작하기</h2>
+      <p class="lead">프로그래밍을 몰라도 따라 하실 수 있도록 순서대로 적었습니다. 처음 한 번만 준비하면, 다음부터는 4단계(<code>run.bat</code> 더블클릭)만 반복하시면 됩니다.</p>
+
+      <div class="steps">
+
+        <div class="step">
+          <h3>파이썬(Python) 설치하기</h3>
+          <p>파이썬은 이 프로그램을 돌리는 엔진입니다. <a href="https://www.python.org/downloads/">python.org 다운로드 페이지</a>에서 3.11 이상 버전을 받아 설치하세요.</p>
+          <p class="warn">설치 첫 화면 맨 아래의 &ldquo;Add python.exe to PATH&rdquo; 체크박스를 반드시 켜고 설치하세요. 이걸 놓치면 프로그램이 파이썬을 찾지 못합니다.</p>
+        </div>
+
+        <div class="step">
+          <h3>FFmpeg 설치하기</h3>
+          <p>FFmpeg는 영상과 소리를 다루는 무료 도구입니다. 윈도우 시작 버튼을 눌러 &ldquo;PowerShell&rdquo;을 찾아 실행한 뒤, 아래 한 줄을 그대로 붙여넣고 Enter를 누르세요.</p>
+          <code class="block">winget install Gyan.FFmpeg</code>
+          <p style="margin-top:10px;">설치가 끝나면 PowerShell 창을 닫았다가 다시 열어야 적용됩니다. winget이 없다는 메시지가 나오면 마이크로소프트 스토어에서 &ldquo;앱 설치 관리자(App Installer)&rdquo;를 먼저 설치하세요.</p>
+        </div>
+
+        <div class="step">
+          <h3>프로그램 내려받기</h3>
+          <p><a href="https://github.com/parkjikoon-hub/moviefit-studio">GitHub 저장소</a>에 들어가 초록색 <strong>Code</strong> 버튼 &rarr; <strong>Download ZIP</strong>을 누르세요. 내려받은 압축 파일을 오른쪽 클릭 &rarr; &ldquo;압축 풀기&rdquo;로 원하는 폴더(예: 문서 폴더)에 풀어 주세요.</p>
+          <p style="margin-top:10px;">명령줄이 익숙하시다면 아래 명령으로 받으셔도 됩니다.</p>
+          <code class="block">git clone https://github.com/parkjikoon-hub/moviefit-studio.git</code>
+        </div>
+
+        <div class="step">
+          <h3><code>run.bat</code> 더블클릭</h3>
+          <p>압축을 푼 폴더 안의 <code>run.bat</code> 파일을 더블클릭하세요. 검은 창이 잠깐 뜨면서 필요한 준비를 마친 뒤, 브라우저가 자동으로 열리며 작업 화면이 나타납니다.</p>
+          <p style="margin-top:10px;">첫 실행은 필요한 파일을 받느라 몇 분 걸릴 수 있습니다. 검은 창은 작업하는 동안 켜 두시고, 다 쓰신 뒤에 닫으면 프로그램이 종료됩니다.</p>
+          <p style="margin-top:10px;">무언가 잘 안 될 때는 같은 폴더에서 아래 명령으로 환경을 점검할 수 있습니다. 부족한 것이 있으면 한국어로 알려 줍니다.</p>
+          <code class="block">python tools/check_env.py</code>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. FAQ -->
+  <section class="section" id="faq">
+    <div class="wrap">
+      <p class="eyebrow">FAQ</p>
+      <h2>자주 묻는 질문</h2>
+      <p class="lead">더 궁금한 점은 GitHub 저장소의 Issues에 남겨 주세요.</p>
+
+      <div class="faq">
+        <details open>
+          <summary>정말 무료인가요?</summary>
+          <div class="answer">네, 완전히 무료입니다. MIT 라이선스로 공개된 오픈소스이며 유료 기능, 사용 횟수 제한, 결제 유도가 없습니다. 결과물에 워터마크도 찍히지 않고, 만든 자막과 영상은 상업적 용도로도 자유롭게 쓰실 수 있습니다.</div>
+        </details>
+
+        <details>
+          <summary>인터넷 연결이 필요한가요?</summary>
+          <div class="answer">자막 자동 생성은 인터넷 없이 동작합니다. 음성 인식이 컴퓨터 안에서 이루어지기 때문입니다. 다만 처음 설치할 때와, AI 나레이션(TTS)을 만들 때는 인터넷이 필요합니다. 나레이션 음성은 마이크로소프트의 온라인 음성 서비스를 사용하기 때문입니다.</div>
+        </details>
+
+        <details>
+          <summary>내 영상이 어디로 전송되나요?</summary>
+          <div class="answer">영상과 오디오 파일은 어디로도 전송되지 않습니다. 불러온 파일은 컴퓨터 안에서만 처리되고, 결과물도 컴퓨터에 저장됩니다. 단 하나의 예외는 AI 나레이션입니다. 나레이션을 만들 때는 <strong>대본 텍스트만</strong> 음성 합성 서버로 전송되며, 이 사실은 프로그램 화면에도 안내됩니다. 영상 파일 자체는 이때도 전송되지 않습니다.</div>
+        </details>
+
+        <details>
+          <summary>맥(Mac)이나 리눅스에서도 되나요?</summary>
+          <div class="answer">현재는 윈도우 전용입니다. 윈도우 10과 11에서 동작하도록 만들고 있으며, <code>run.bat</code>과 설치 안내도 윈도우 기준입니다. 맥과 리눅스 지원 계획은 아직 없습니다.</div>
+        </details>
+
+        <details>
+          <summary>좋은 그래픽카드가 있어야 하나요?</summary>
+          <div class="answer">아닙니다. 그래픽카드(GPU)가 없어도 동작합니다. 있으면 자동으로 활용해 더 빨라집니다. CPU만 쓰는 경우 10분짜리 영상의 자막 생성에 몇 분 정도가 걸릴 수 있으며, 진행률이 계속 표시되므로 얼마나 남았는지 확인하실 수 있습니다.</div>
+        </details>
+
+        <details>
+          <summary>이미 만들어 둔 자막 파일을 불러올 수 있나요?</summary>
+          <div class="answer">SRT 내보내기는 우선 개발 대상이고, SRT·VTT 가져오기는 그 다음 단계로 계획되어 있습니다. 다른 도구와 파일을 자유롭게 주고받는 것이 이 프로젝트의 목표 중 하나입니다.</div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="section">
+    <div class="wrap">
+      <div class="cta">
+        <h2>지금 내려받아 써 보세요</h2>
+        <p>설치는 4단계, 비용은 0원입니다.</p>
+        <div class="btnrow">
+          <a class="btn btn-primary" href="https://github.com/parkjikoon-hub/moviefit-studio">GitHub에서 내려받기</a>
+          <a class="btn btn-secondary" href="#install">설치 방법 다시 보기</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footlinks">
+      <strong style="color:var(--text);">MovieFit Studio</strong>
+      <a href="https://github.com/parkjikoon-hub/moviefit-studio">GitHub 저장소</a>
+      <a href="https://github.com/parkjikoon-hub/moviefit-studio/issues">문의 · 버그 신고</a>
+      <span>MIT 라이선스</span>
+    </div>
+    <p class="disclaimer">CapCut은 ByteDance의 상표이며 본 프로젝트와 관련이 없습니다. 본 프로젝트는 어떤 회사의 후원이나 승인도 받지 않은 독립 오픈소스 프로젝트입니다.</p>
+  </div>
+</footer>
+
+</body>
+</html>

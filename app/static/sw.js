@@ -1,7 +1,7 @@
 /* 서비스 워커 — 브라우저에 앱으로 설치될 수 있게 하고, 화면 파일만 캐시한다.
    영상·오디오·API 응답은 캐시하지 않는다 (항상 최신이어야 하므로). */
 
-const CACHE = "capcut-studio-v1";
+const CACHE = "moviefit-studio-v1";
 const SHELL = [
   "/",
   "/index.html",

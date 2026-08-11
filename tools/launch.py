@@ -34,7 +34,7 @@ REQUIRED = {
 def banner() -> None:
     print()
     print("=" * 60)
-    print("  CapCut Studio — 자막·나레이션 스튜디오")
+    print("  MovieFit Studio — 자막·나레이션 스튜디오")
     print("=" * 60)
     print()
 

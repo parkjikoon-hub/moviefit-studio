@@ -37,7 +37,7 @@ def _open_browser_soon(url: str, delay: float = 1.5) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="CapCut Studio 로컬 서버")
+    parser = argparse.ArgumentParser(description="MovieFit Studio 로컬 서버")
     parser.add_argument("--host", default=HOST)
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--open", action="store_true", help="브라우저를 자동으로 연다")
@@ -48,7 +48,7 @@ def main() -> None:
 
     url = f"http://{args.host}:{args.port}"
     print("=" * 60)
-    print("  CapCut Studio — 자막·나레이션 스튜디오")
+    print("  MovieFit Studio — 자막·나레이션 스튜디오")
     print(f"  주소: {url}")
     print("  이 창을 닫으면 프로그램이 종료됩니다.")
     print("=" * 60)
