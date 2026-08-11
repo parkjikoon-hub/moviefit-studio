@@ -1,0 +1,9 @@
+# CapCut Studio 실행에 필요한 파이썬 패키지 목록
+# 설치: python -m pip install -r requirements.txt
+
+fastapi>=0.115          # 웹 서버 뼈대 (브라우저 화면에 데이터를 주고받는 역할)
+uvicorn[standard]>=0.30 # 위 FastAPI를 실제로 띄워주는 실행기
+python-multipart>=0.0.9 # 브라우저에서 파일을 업로드할 때 필요
+pysubs2>=1.7            # 자막 파일(SRT/VTT/ASS) 읽기·쓰기 도구
+edge-tts>=7.0           # AI 나레이션 음성 생성 (무료)
+faster-whisper>=1.0.3   # 로컬 음성인식 (영상에서 자막 자동 생성)

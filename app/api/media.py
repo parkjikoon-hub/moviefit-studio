@@ -1,0 +1,102 @@
+"""영상·오디오 스트리밍 (Range 요청 지원).
+
+브라우저의 <video> 태그는 재생 위치를 옮길 때 "파일의 이 구간만 달라"(Range 요청)고
+물어본다. 이걸 지원하지 않으면 탐색(시크)이 동작하지 않으므로 직접 처리한다.
+"""
+
+from __future__ import annotations
+
+import mimetypes
+import re
+from pathlib import Path
+from typing import Iterator
+
+from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
+from app.core import projects as store
+
+router = APIRouter(prefix="/media", tags=["media"])
+
+CHUNK = 1024 * 512  # 512KB씩 흘려보낸다
+_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
+
+
+def _iter_file(path: Path, start: int, end: int) -> Iterator[bytes]:
+    remaining = end - start + 1
+    with path.open("rb") as fh:
+        fh.seek(start)
+        while remaining > 0:
+            data = fh.read(min(CHUNK, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def stream_file(path: Path, range_header: str | None) -> StreamingResponse:
+    """파일 하나를 Range 지원과 함께 내보낸다."""
+    if not path.is_file():
+        raise HTTPException(404, f"파일을 찾을 수 없습니다: {path}")
+
+    size = path.stat().st_size
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+
+    start, end = 0, size - 1
+    status = 200
+    if range_header:
+        match = _RANGE_RE.match(range_header.strip())
+        if match:
+            raw_start, raw_end = match.groups()
+            if raw_start:
+                start = int(raw_start)
+                if raw_end:
+                    end = int(raw_end)
+            elif raw_end:  # "bytes=-500" → 마지막 500바이트
+                start = max(0, size - int(raw_end))
+            if start >= size:
+                raise HTTPException(416, "요청한 구간이 파일 크기를 벗어났습니다.")
+            end = min(end, size - 1)
+            status = 206
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+        "Cache-Control": "no-store",
+    }
+    if status == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+
+    return StreamingResponse(
+        _iter_file(path, start, end), status_code=status, media_type=media_type, headers=headers
+    )
+
+
+@router.get("/project/{project_id}/video")
+def project_video(project_id: str, request: Request, range: str | None = Header(default=None)):
+    """프로젝트에 등록된 원본 영상을 재생용으로 내보낸다."""
+    try:
+        data = store.load_project(project_id)
+    except store.ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    video_path = data.get("video_path")
+    if not video_path:
+        raise HTTPException(404, "이 프로젝트에는 등록된 영상이 없습니다.")
+    return stream_file(Path(video_path), range)
+
+
+@router.get("/project/{project_id}/file/{rel_path:path}")
+def project_file(
+    project_id: str, rel_path: str, request: Request, range: str | None = Header(default=None)
+):
+    """프로젝트 폴더 안의 파일(나레이션 오디오, 내보낸 결과물)을 내보낸다."""
+    try:
+        pdir = store.project_dir(project_id).resolve()
+    except store.ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    target = (pdir / rel_path).resolve()
+    if not target.is_relative_to(pdir):  # 프로젝트 폴더 밖은 접근 금지
+        raise HTTPException(403, "허용되지 않은 경로입니다.")
+    return stream_file(target, range)

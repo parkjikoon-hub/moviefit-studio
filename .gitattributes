@@ -1,0 +1,22 @@
+# 줄바꿈 규칙
+# 배치 파일은 반드시 윈도우식(CRLF)이어야 한다.
+# LF로 저장되면 cmd가 각 줄의 앞글자를 잘라먹어 실행이 통째로 깨진다.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# 나머지 텍스트 파일은 LF로 통일
+*.py   text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+
+# 이진 파일은 건드리지 않는다
+*.png  binary
+*.ico  binary
+*.otf  binary
+*.ttf  binary
+*.mp4  binary
+*.mp3  binary

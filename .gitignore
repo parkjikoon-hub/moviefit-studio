@@ -1,0 +1,22 @@
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 사용자 작업물 — 저장소에 올리지 않는다
+projects/
+tests/sample/*.mp4
+tests/sample/*.wav
+tests/sample/*.mp3
+
+# 번들 폰트는 용량이 커서 tools/fetch_font.py 로 각자 받게 한다
+assets/fonts/*.otf
+assets/fonts/*.ttf
+
+# 개발 도구
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+{
+  "name": "CapCut Studio — 자막·나레이션 스튜디오",
+  "short_name": "CapCut Studio",
+  "description": "영상 자막 자동 생성·편집과 AI 나레이션을 한 화면에서 처리하는 로컬 도구",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#17181C",
+  "theme_color": "#17181C",
+  "categories": ["productivity", "utilities", "video"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
