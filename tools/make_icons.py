@@ -51,7 +51,7 @@ def _draw_icon(size: int, padding_ratio: float = 0.0) -> Image.Image:
         """그림 영역 안의 비율 좌표(0~1)를 실제 픽셀로 바꾼다."""
         return (x0 + w * fx, y0 + h * fy)
 
-    # 프레임(영상 화면을 뜻하는 얇은 청록 테두리)
+    # 프레임(영상 화면을 뜻하는 얇은 테두리)
     fx0, fy0 = px(0.17, 0.17)
     fx1, fy1 = px(0.83, 0.83)
     d.rounded_rectangle(

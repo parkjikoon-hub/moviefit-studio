@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MovieFit Studio — 무료 자막 자동 생성 · AI 나레이션 도구</title>
 <meta name="description" content="영상을 넣으면 자막을 자동으로 만들고, 대본을 넣으면 AI 나레이션과 완벽히 동기화된 자막을 만들어 주는 무료 윈도우용 도구. 내 컴퓨터에서만 처리되고, 워터마크도 계정도 없습니다.">
-<meta name="theme-color" content="#17181C">
+<meta name="theme-color" content="#0D0C0B">
 <link rel="icon" href="icons/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -21,15 +21,20 @@
 <meta name="twitter:image" content="icons/icon-512.png">
 <style>
 :root{
-  --bg:#17181C;
-  --surface:#1E2026;
-  --surface-2:#262932;
-  --border:#33373F;
-  --text:#E8EAED;
-  --dim:#9AA0AA;
-  --accent:#2DD4BF;
-  --accent-dark:#14B8A6;
-  --radius:14px;
+  /* 색은 프로그램 화면(app/static/style.css)의 :root 를 그대로 따른다.
+     사이트에서는 청록을 보고 내려받았는데 프로그램을 켜면 크림이 나오면
+     같은 물건으로 보이지 않는다. */
+  --bg:#0D0C0B;          /* 따뜻한 검정 바탕 */
+  --surface:#131211;     /* 카드 바탕 */
+  --surface-2:#24211E;   /* 한 단계 밝은 상자 */
+  --border:#4A443C;      /* 보통 구분선 */
+  --border-strong:#D8CFBC; /* 바깥 상자 테두리 — 진한 크림 */
+  --text:#EDEAE3;
+  --dim:#9A9287;
+  --accent:#E8E2D5;      /* 강조색 = 크림 한 가지 */
+  --accent-dark:#CFC7B5;
+  --accent-ink:#14120F;  /* 크림 바탕 위에 얹는 글자색 */
+  --radius:3px;          /* 모서리는 거의 각지게 */
   --maxw:1080px;
 }
 *,*::before,*::after{box-sizing:border-box;}
@@ -51,7 +56,7 @@ a:hover{text-decoration:underline;}
 :focus-visible{
   outline:3px solid var(--accent);
   outline-offset:3px;
-  border-radius:6px;
+  border-radius:3px;
 }
 h1,h2,h3{line-height:1.35;margin:0;letter-spacing:-0.02em;}
 p{margin:0;}
@@ -61,8 +66,8 @@ code{
   font-size:0.92em;
   background:var(--surface-2);
   border:1px solid var(--border);
-  color:#BDF5EC;
-  border-radius:8px;
+  color:var(--accent);
+  border-radius:3px;
   padding:2px 7px;
   overflow-wrap:anywhere;
   white-space:pre-wrap;
@@ -91,17 +96,17 @@ code.block{
 /* ── 헤더 ── */
 .topbar{
   position:sticky;top:0;z-index:50;
-  background:rgba(23,24,28,0.88);
+  background:rgba(13,12,11,0.9);
   backdrop-filter:blur(10px);
   border-bottom:1px solid var(--border);
 }
 .topbar .wrap{display:flex;align-items:center;gap:14px;height:60px;}
 .brand{display:flex;align-items:center;gap:10px;color:var(--text);font-weight:700;}
 .brand:hover{text-decoration:none;}
-.brand img{width:28px;height:28px;border-radius:7px;}
+.brand img{width:28px;height:28px;border-radius:3px;}
 .topbar nav{margin-left:auto;display:flex;gap:8px;align-items:center;}
 .topbar nav a{
-  color:var(--dim);font-size:0.93rem;padding:6px 10px;border-radius:8px;
+  color:var(--dim);font-size:0.93rem;padding:6px 10px;border-radius:3px;
 }
 .topbar nav a:hover{color:var(--text);background:var(--surface-2);text-decoration:none;}
 .nav-hide{display:none;}
@@ -110,9 +115,9 @@ code.block{
 /* ── 히어로 ── */
 .hero{padding:64px 0 76px;text-align:center;}
 .hero-logo{
-  width:104px;height:104px;margin:0 auto 24px;border-radius:26px;
+  width:104px;height:104px;margin:0 auto 24px;border-radius:3px;
   border:1px solid var(--border);background:var(--surface);
-  box-shadow:0 12px 40px rgba(45,212,191,0.14);
+  box-shadow:0 12px 40px rgba(232,226,213,0.10);
 }
 .hero h1{font-size:clamp(2rem,7vw,3.1rem);margin-bottom:8px;}
 .hero h1 .accent{color:var(--accent);}
@@ -124,21 +129,21 @@ code.block{
 .btnrow{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;}
 .btn{
   display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  padding:13px 26px;border-radius:11px;font-weight:700;font-size:1rem;
+  padding:13px 26px;border-radius:3px;font-weight:700;font-size:1rem;
   border:1px solid transparent;cursor:pointer;transition:transform .12s ease,background .12s ease;
 }
 .btn:hover{text-decoration:none;transform:translateY(-1px);}
-.btn-primary{background:var(--accent);color:#0C1A18;}
+.btn-primary{background:var(--accent);color:var(--accent-ink);}
 .btn-primary:hover{background:var(--accent-dark);}
 .btn-secondary{background:var(--surface-2);color:var(--text);border-color:var(--border);}
-.btn-secondary:hover{background:#2F333E;}
+.btn-secondary:hover{background:#302C28;}
 .badges{
   display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:26px;
 }
 .badge{
   font-size:0.83rem;color:var(--dim);
   border:1px solid var(--border);background:var(--surface);
-  border-radius:999px;padding:5px 13px;
+  border-radius:3px;padding:5px 13px;
 }
 .badge b{color:var(--accent);font-weight:700;}
 
@@ -156,8 +161,8 @@ code.block{
 .card p{color:var(--dim);font-size:0.96rem;}
 .card .num{
   display:inline-flex;align-items:center;justify-content:center;
-  width:34px;height:34px;border-radius:10px;margin-bottom:14px;
-  background:rgba(45,212,191,0.13);color:var(--accent);
+  width:34px;height:34px;border-radius:3px;margin-bottom:14px;
+  background:rgba(232,226,213,0.12);color:var(--accent);
   font-weight:800;font-size:0.95rem;
 }
 
@@ -171,15 +176,15 @@ code.block{
 .feat li::before{content:"—";color:var(--accent);flex:none;}
 .tag{
   font-size:0.72rem;font-weight:700;letter-spacing:0.02em;
-  border-radius:999px;padding:2px 9px;border:1px solid var(--border);
+  border-radius:3px;padding:2px 9px;border:1px solid var(--border);
   color:var(--dim);background:var(--surface-2);
 }
-.tag.now{color:var(--accent);border-color:rgba(45,212,191,0.4);background:rgba(45,212,191,0.1);}
+.tag.now{color:var(--accent);border-color:rgba(232,226,213,0.45);background:rgba(232,226,213,0.10);}
 .note{
   margin-top:20px;color:var(--dim);font-size:0.9rem;
   background:var(--surface-2);border:1px solid var(--border);
   border-left:3px solid var(--accent);
-  border-radius:10px;padding:14px 16px;
+  border-radius:3px;padding:14px 16px;
 }
 
 /* ── 설치 단계 ── */
@@ -192,13 +197,13 @@ code.block{
 .step::before{
   counter-increment:step;content:counter(step);
   position:absolute;left:22px;top:22px;
-  width:32px;height:32px;border-radius:10px;
+  width:32px;height:32px;border-radius:3px;
   display:flex;align-items:center;justify-content:center;
-  background:var(--accent);color:#0C1A18;font-weight:800;font-size:0.95rem;
+  background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:0.95rem;
 }
 .step h3{font-size:1.05rem;margin-bottom:8px;}
 .step p{color:var(--dim);font-size:0.95rem;}
-.step .warn{color:#F5D775;font-weight:600;}
+.step .warn{color:#D9A94E;font-weight:600;}
 @media (max-width:480px){
   .step{padding-left:24px;padding-top:66px;}
 }
@@ -223,9 +228,10 @@ details[open] summary::after{content:"\2212";}
 details .answer{color:var(--dim);font-size:0.96rem;padding:0 0 20px;margin-top:-4px;}
 
 /* ── CTA ── */
+/* 마지막 내려받기 상자만 진한 크림 2px — 프로그램 화면의 '바깥 상자'와 같은 규칙 */
 .cta{
   text-align:center;background:var(--surface);
-  border:1px solid var(--border);border-radius:20px;padding:48px 24px;
+  border:2px solid var(--border-strong);border-radius:var(--radius);padding:48px 24px;
 }
 .cta h2{font-size:clamp(1.4rem,4vw,1.9rem);margin-bottom:10px;}
 .cta p{color:var(--dim);margin-bottom:26px;}
@@ -236,8 +242,8 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
 .disclaimer{font-size:0.85rem;line-height:1.7;max-width:70ch;}
 .skip{
   position:absolute;left:-9999px;top:0;
-  background:var(--accent);color:#0C1A18;padding:10px 16px;
-  border-radius:0 0 10px 0;font-weight:700;z-index:100;
+  background:var(--accent);color:var(--accent-ink);padding:10px 16px;
+  border-radius:0 0 3px 0;font-weight:700;z-index:100;
 }
 .skip:focus{left:0;}
 </style>
