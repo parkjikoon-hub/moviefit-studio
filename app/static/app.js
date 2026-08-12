@@ -18,6 +18,7 @@ let redoStack = [];
 const UNDO_MAX = 50;
 
 let waveformPeaks = null;  // 소리 파형 데이터 (0~1 배열)
+let exportWarning = null;  // 내보내기 전에 알려야 할 경고 (예: 나레이션이 영상보다 김)
 let abLoop = null;         // 구간 반복 {start, end} 또는 {start} (끝을 찍는 중)
 let tapSyncOn = false;     // 두드려 맞추기 모드
 
@@ -1620,10 +1621,24 @@ async function previewScriptSplit() {
 }
 
 // ══ 내보내기 (F-03, F-50, F-54) ════════════════════════════
-function openExportDialog() {
+async function openExportDialog() {
   if (!project) return;
   const dialog = $("#export-dialog");
   $("#export-done").hidden = true;
+
+  // 나레이션이 영상보다 길면 뒷부분이 잘린다. 내보내기 직전에 반드시 알린다 —
+  // 나레이션을 만든 지 한참 뒤에 내보내는 경우가 많아서, 만들 때 한 번 알린 것으로는 부족하다.
+  const warnBox = $("#export-warning");
+  warnBox.hidden = true;
+  exportWarning = null;
+  try {
+    const info = await api(`/api/projects/${encodeURIComponent(project.id)}/narration/status`);
+    if (info.warning) {
+      exportWarning = info.warning;
+      warnBox.textContent = `⚠ ${info.warning}`;
+      warnBox.hidden = false;
+    }
+  } catch (_) { /* 경고를 못 받아도 내보내기 자체는 막지 않는다 */ }
 
   const hasSegments = segments().length > 0;
   const hasVideo = !!project.video_path;
@@ -1655,6 +1670,11 @@ async function doExport(kind) {
     narr_audio: "나레이션 오디오를 만들고 있습니다",
     narr_video: "나레이션을 영상에 입히고 있습니다",
   };
+
+  // 잘림 경고가 있는데 영상으로 내보내려 한다면 한 번 더 확인받는다
+  if (exportWarning && (kind === "narr_video" || kind === "burn")) {
+    if (!confirm(`${exportWarning}\n\n그래도 이대로 만들까요?`)) return;
+  }
 
   clearTimeout(saveTimer);
   await saveNow();  // 서버가 최신 자막으로 만들도록 먼저 저장한다

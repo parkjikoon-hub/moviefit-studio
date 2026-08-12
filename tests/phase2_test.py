@@ -138,18 +138,43 @@ def main() -> int:
         dur = (s.get("tts") or {}).get("duration")
         print(f"      {s['start']:>6.2f} ~ {s['end']:>6.2f}  (음성 {dur:.2f}초)  {s['text'][:30]}")
 
-    # 핵심 검증: 각 자막 길이가 그 문장 음성의 실측 길이와 같아야 한다
-    print("\n[3] 자막 시각이 음성 실측 길이와 일치하는가 (D1의 근거)")
-    worst = 0.0
-    for s in segments:
-        measured = (s.get("tts") or {}).get("duration") or 0
-        shown = s["end"] - s["start"]
-        worst = max(worst, abs(shown - measured))
-    check("모든 자막이 음성 길이와 10밀리초 이내로 일치", worst < 0.01, f"최대 차이 {worst * 1000:.1f}ms")
+    # ── 핵심 검증 (D1) ───────────────────────────────────
+    # 주의: "자막 길이 == tts.duration" 비교는 의미가 없다. 자막 길이를 tts.duration으로
+    # 계산했으니 당연히 같다(동어반복). 실제로 만들어진 오디오 파일을 열어서
+    # 소리가 언제 나는지를 따로 재고, 그 값과 자막 시각을 대조해야 진짜 검증이다.
+    print("\n[3] 자막 시각이 '실제 소리'와 맞는가 (D1 — 동어반복이 아닌 검증)")
 
-    # 문장 사이 간격이 설정값(0.3초)대로인가
+    from app.core import audio_analysis  # noqa: E402  (서버가 아니라 파일을 직접 잰다)
+
+    audio_file = ROOT / "projects" / pid / result["audio"]
+    check("이어 붙인 오디오 파일이 실제로 있음", audio_file.is_file(), audio_file.name)
+
+    regions = audio_analysis.detect_speech_regions(
+        audio_file, noise_db=-40.0, min_silence=0.15, min_speech=0.15
+    )
+    check("소리에서 말하는 구간을 문장 수만큼 찾음",
+          len(regions) == len(segments), f"{len(regions)}개 구간 / 자막 {len(segments)}개")
+
+    if len(regions) == len(segments):
+        offsets = [round(r["start"] - s["start"], 3) for r, s in zip(regions, segments)]
+        print(f"      문장별 어긋남(초): {offsets}")
+        worst = max(abs(o) for o in offsets)
+        check("모든 자막이 실제 소리와 0.2초 이내로 맞음", worst < 0.2, f"최대 {worst:.3f}초")
+        # 이 설계가 막겠다고 한 실패는 '뒤로 갈수록 벌어지는 것'이다
+        drift = abs(offsets[-1] - offsets[0])
+        check("뒤로 갈수록 어긋남이 커지지 않음 (누적 드리프트 없음)",
+              drift < 0.1, f"첫 문장 {offsets[0]:+.3f}초 → 마지막 {offsets[-1]:+.3f}초")
+
+    # 문장 사이 간격이 설정값(0.3초)대로인가 — 자막상 간격과 실제 들리는 정적 둘 다 본다
     gaps = [round(segments[i + 1]["start"] - segments[i]["end"], 3) for i in range(len(segments) - 1)]
-    check("문장 사이 간격이 설정대로", all(abs(g - 0.3) < 0.02 for g in gaps), f"간격 {gaps}")
+    check("자막상 문장 간격이 설정대로", all(abs(g - 0.3) < 0.02 for g in gaps), f"간격 {gaps}")
+
+    if len(regions) == len(segments):
+        real_gaps = [round(regions[i + 1]["start"] - regions[i]["end"], 3)
+                     for i in range(len(regions) - 1)]
+        print(f"      실제 들리는 정적(초): {real_gaps}")
+        check("실제 정적도 설정값에 가까움 (앞뒤 무음 잘라내기 확인)",
+              all(g < 0.75 for g in real_gaps), f"최대 {max(real_gaps):.2f}초")
 
     # ── 4. 한 문장만 다시 만들기 (F-43) ──────────────────
     print("\n[4] 한 문장만 고쳐 다시 만들기 (F-43)")
@@ -213,6 +238,22 @@ def main() -> int:
               status == 400 and "영상" in body.get("detail", ""), body.get("detail", "")[:40])
     status, body = req(f"/api/projects/{pid}/narration", "POST", {"segment_id": "없는문장"})
     check("없는 문장 재생성 → 400", status == 400, body.get("detail", "")[:40])
+
+    # 음성 생성이 실패해도 서버가 죽지 않아야 한다 (없는 목소리 이름으로 유도)
+    status, broken = req("/api/projects", "POST", {"name": "P2_잘못된목소리", "mode": "script"})
+    if status == 201:
+        made.append(broken["id"])
+        broken["script"] = "짧은 시험 문장입니다."
+        broken["narration"]["voice"] = "존재하지-않는-목소리"
+        req(f"/api/projects/{broken['id']}", "PUT", broken)
+        status, started = req(f"/api/projects/{broken['id']}/narration", "POST", {})
+        if status == 200:
+            result, error = wait_job(started["job_id"], timeout=120, quiet=True)
+            check("음성 생성 실패 시 한국어 안내와 함께 작업만 실패",
+                  result is None and error and any("가" <= c <= "힣" for c in error),
+                  (error or "")[:50])
+        status, _ = req("/api/health")
+        check("실패 후에도 서버가 정상 동작", status == 200)
 
     # ── 뒷정리 ───────────────────────────────────────────
     print("\n[8] 뒷정리")

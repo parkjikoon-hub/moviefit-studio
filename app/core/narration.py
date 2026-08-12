@@ -138,6 +138,13 @@ def _synthesize_one(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(result.audio)
 
+    # 앞뒤 무음을 잘라 낸다. edge-tts는 말 앞에 0.2초, 뒤에 0.9초쯤 침묵을 붙여 주는데
+    # 그대로 두면 "문장 사이 0.3초" 설정이 실제로는 1.4초가 되고, 말이 끝난 뒤에도
+    # 자막이 한참 더 떠 있게 된다. 자르고 나면 잰 길이가 곧 '말하는 시간'이 된다.
+    from app.core import audio_mix
+
+    audio_mix.trim_silence(target)
+
     # 엔진이 알려 준 길이를 믿지 않고 파일에서 다시 잰다.
     # 이 값이 자막 타이밍의 근거이므로 가장 확실한 방법을 쓴다.
     return measure_duration(target)

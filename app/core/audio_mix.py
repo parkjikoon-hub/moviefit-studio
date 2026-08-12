@@ -86,6 +86,75 @@ def _audio_output_args(out_path: Path) -> list[str]:
     return ["-c:a", "libmp3lame", "-q:a", "2", "-ar", "44100", "-ac", "2"]
 
 
+# ── 0) 문장 음성의 앞뒤 무음 잘라내기 ──────────────────────
+# 왜 필요한가 (실측으로 확인된 문제):
+# edge-tts가 돌려주는 mp3는 말이 시작되기 전에 0.21초쯤, 말이 끝난 뒤에 0.9초쯤
+# 무음을 붙여서 준다. 이걸 그대로 두면
+#   ① "문장 사이 간격 0.3초" 설정이 실제로는 1.4초가 되고
+#   ② 말이 끝난 뒤에도 자막이 0.9초 더 떠 있어 어색하다.
+# 그래서 음성을 만든 직후 앞뒤 무음을 잘라 낸다. 그러면 잰 길이가 곧 '말하는 시간'이 되고
+# 사용자가 정한 간격이 화면에서도 그대로 지켜진다.
+TRIM_PAD = 0.06  # 말이 뚝 잘린 느낌이 나지 않게 앞뒤로 남겨 두는 여유(초)
+
+
+def trim_silence(path: str | Path, pad: float = TRIM_PAD) -> dict[str, Any]:
+    """오디오 파일의 앞뒤 무음을 잘라 같은 자리에 다시 쓴다.
+
+    돌려주는 값: {"trimmed": bool, "before": 원래길이, "after": 자른뒤길이,
+                  "head": 앞에서 자른 초, "tail": 뒤에서 자른 초}
+    말소리를 찾지 못하면 원본을 그대로 둔다 (자르는 것보다 두는 편이 안전하다).
+    """
+    from app.core import audio_analysis
+
+    _require("ffmpeg")
+    src = Path(path)
+    if not src.is_file():
+        raise RenderError(f"파일이 없습니다: {src}")
+
+    before = measure_duration(src)
+
+    try:
+        # 나레이션은 문장 하나짜리 짧은 파일이라 기준을 촘촘하게 잡는다
+        regions = audio_analysis.detect_speech_regions(
+            src, noise_db=-40.0, min_silence=0.12, min_speech=0.08
+        )
+    except Exception:
+        return {"trimmed": False, "before": before, "after": before, "head": 0.0, "tail": 0.0}
+
+    if not regions:
+        return {"trimmed": False, "before": before, "after": before, "head": 0.0, "tail": 0.0}
+
+    start = max(0.0, float(regions[0]["start"]) - pad)
+    end = min(before, float(regions[-1]["end"]) + pad)
+    if end - start < 0.05 or (start < 0.02 and before - end < 0.02):
+        # 잘라 낼 것이 거의 없다
+        return {"trimmed": False, "before": before, "after": before, "head": 0.0, "tail": 0.0}
+
+    tmp = src.with_name(src.stem + ".trim.tmp" + src.suffix)
+    cmd = [
+        "ffmpeg", "-y", "-v", "error",
+        "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
+        "-i", str(src),
+        *_audio_output_args(src),
+        str(tmp),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=120)
+    if result.returncode != 0 or not tmp.is_file():
+        tmp.unlink(missing_ok=True)
+        return {"trimmed": False, "before": before, "after": before, "head": 0.0, "tail": 0.0}
+
+    os.replace(tmp, src)
+    after = measure_duration(src)
+    return {
+        "trimmed": True,
+        "before": round(before, 3),
+        "after": round(after, 3),
+        "head": round(start, 3),
+        "tail": round(before - end, 3),
+    }
+
+
 # ── 1) 문장별 나레이션을 하나로 이어 붙이기 (F-40 지원 / F-52) ──
 def concat_narration(
     report: Reporter | None = None,
