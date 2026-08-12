@@ -1,5 +1,20 @@
 /* MovieFit Studio 화면 스타일 — UI_SPEC 4절(다크 테마, 포인트 청록) */
 
+/* 한글 글꼴 Pretendard.
+   폰트 파일을 브라우저에 직접 넘겨야 실제로 적용된다. 이게 없으면 윈도우 기본 글꼴
+   (맑은 고딕)로 나오는데, 작은 글자에서 한글과 영문이 섞이면 눈이 피로해진다.
+   가변 폰트라 파일 하나로 얇은 것부터 굵은 것까지 다 쓴다.
+   파일이 없으면 tools/fetch_font.py 로 받는다. */
+@font-face {
+  font-family: "Pretendard";
+  /* format은 "woff2"로 적는다. "woff2-variations"로 적으면 이를 모르는 브라우저가
+     이 줄 전체를 무시해 폰트가 아예 안 나온다. 가변 축은 woff2 표기로도 정상 동작한다. */
+  src: url("/fonts/PretendardVariable.woff2") format("woff2");
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg:        #17181C;
   --bg-1:      #1E2026;
@@ -14,7 +29,7 @@
   --warn:      #FBBF24;
   --danger:    #F87171;
   --radius:    10px;
-  --font: "Pretendard", "Malgun Gothic", "맑은 고딕", system-ui, sans-serif;
+  --font: "Pretendard", "Noto Sans KR", "Malgun Gothic", "맑은 고딕", system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -22,10 +37,23 @@
 html, body {
   margin: 0; height: 100%; overflow: hidden;
   background: var(--bg); color: var(--text);
-  font-family: var(--font); font-size: 14px; line-height: 1.5;
+  font-family: var(--font);
+  font-size: 14.5px;      /* 한글은 같은 크기라도 영문보다 작아 보여 살짝 키운다 */
+  line-height: 1.6;       /* 줄 간격을 넉넉히 — 빽빽하면 눈이 먼저 지친다 */
+  letter-spacing: -0.003em;
+  word-break: keep-all;   /* 한국어 낱말이 중간에서 잘리지 않게 한다 */
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+button, input, select, textarea {
+  font-family: inherit; font-size: inherit; color: inherit;
+  letter-spacing: inherit;
+}
+
+/* 숫자는 자릿수가 흔들리지 않게 고정폭으로 — 시간 표시가 덜덜거리지 않는다 */
+.time, .seg-no, .time-input, .val, .seg-meta, .tl-tick { font-variant-numeric: tabular-nums; }
 
 .view { height: 100%; }
 [hidden] { display: none !important; }

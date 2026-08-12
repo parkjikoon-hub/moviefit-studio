@@ -10,6 +10,7 @@ const SHELL = [
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
+  "/fonts/PretendardVariable.woff2",
 ];
 
 self.addEventListener("install", (event) => {

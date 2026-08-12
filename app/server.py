@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,12 @@ from app.api import tts as tts_api
 from app.config import STATIC_DIR, ensure_dirs
 
 log = logging.getLogger("moviefit_studio")
+
+# 윈도우 파이썬은 woff2(웹 폰트) 형식을 모른다. 알려 주지 않으면 엉뚱한 형식으로 내보내
+# 브라우저가 폰트를 거부하고 화면이 기본 글꼴로 나온다.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/woff", ".woff")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
 def create_app() -> FastAPI:

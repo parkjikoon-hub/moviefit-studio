@@ -1,0 +1,8 @@
+이 폴더의 폰트는 Pretendard입니다.
+
+- 이름: Pretendard
+- 만든 사람: 길형진 (orioncactus)
+- 라이선스: SIL Open Font License 1.1 (재배포·임베딩 허용)
+- 원본: https://github.com/orioncactus/pretendard
+
+MovieFit Studio는 자막을 영상에 새겨 넣을 때 이 폰트를 사용합니다.
