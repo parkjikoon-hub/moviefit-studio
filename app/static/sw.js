@@ -1,7 +1,9 @@
 /* 서비스 워커 — 브라우저에 앱으로 설치될 수 있게 하고, 화면 파일만 캐시한다.
    영상·오디오·API 응답은 캐시하지 않는다 (항상 최신이어야 하므로). */
 
-const CACHE = "moviefit-studio-v1";
+/* 저장 이름을 바꾸면 activate 단계에서 옛 저장본이 통째로 지워진다.
+   화면 색이나 아이콘처럼 겉모습이 바뀔 때마다 숫자를 올린다. */
+const CACHE = "moviefit-studio-v2";
 const SHELL = [
   "/",
   "/index.html",
