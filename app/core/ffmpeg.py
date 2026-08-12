@@ -57,7 +57,7 @@ def _fmt_time(seconds: float) -> str:
 
 
 # 필터 인자 안에서 특별한 뜻을 갖는 글자들.
-# ':'는 옵션 구분, ','는 필터 구분, '\'는 이스케이프 문자다.
+# ':'는 옵션 구분, ','와 ';'는 필터 구분, '[]'는 연결 이름, '\'는 이스케이프 문자다.
 _FILTER_SPECIALS = ":'\\,;[]"
 
 
@@ -65,22 +65,48 @@ def _escape_filter_path(path: str | Path) -> str:
     r"""윈도우 경로를 FFmpeg '필터' 안에 넣을 수 있는 형태로 바꾼다.
 
     왜 필요한가 (R6):
-        -vf "ass=C:\projects\자막.ass" 는 실패한다. 필터 문법에서 ':'는 옵션 구분자라
-        FFmpeg은 이걸 "ass 필터에 'C'라는 파일과 '\projects\자막.ass'라는 옵션"으로 읽는다.
-        게다가 '\'는 이스케이프 문자라 경로의 역슬래시도 먹혀 버린다.
-        이때 나오는 오류 메시지가 "Unable to parse option value" 처럼 엉뚱해서
-        경로 문제인 줄 눈치채기가 아주 어렵다. 그래서 여기 한 곳에서만 처리한다.
+        -vf "ass=C:\projects\자막.ass" 는 반드시 실패한다. 필터 문법에서 ':'는 옵션
+        구분자라 FFmpeg은 이걸 "ass 필터에 'C'라는 파일과 '/projects/자막.ass'라는
+        두 번째 옵션"으로 읽는다. 그래서 실제로 튀어나오는 오류는
+        `Unable to parse "original_size" option value ... as image size` 같은
+        완전히 엉뚱한 문장이다. 경로 문제라는 걸 알아채기가 아주 어려우니 주의.
 
-    바꾸는 방법:
+    바꾸는 방법 (실측으로 확인한 형태):
         1) 역슬래시(\)를 슬래시(/)로 — 윈도우 FFmpeg은 슬래시 경로를 그대로 받아들인다.
-        2) 남은 특수문자(: ' , ; [ ]) 앞에 역슬래시를 붙인다.
+        2) 남은 특수문자 앞에 역슬래시를 '두 개' 붙인다.
 
-        C:\Users\INTEL\한글 폴더\자막.ass  →  C\:/Users/INTEL/한글 폴더/자막.ass
+        C:\Users\INTEL\한글 폴더\자막.ass  →  C\\:/Users/INTEL/한글 폴더/자막.ass
+
+        역슬래시가 두 개인 이유: 이 문자열은 껍질이 두 겹이라 두 번 벗겨진다.
+        먼저 필터그래프 해석기가 한 겹(\\ → \)을 벗기고, 그다음 필터의 옵션 해석기가
+        나머지 한 겹(\: → :)을 벗긴다. 한 개만 붙이면 첫 단계에서 다 사라져서
+        옵션 해석기가 다시 ':'를 구분자로 잘라 버린다. (실측 확인함)
 
     한글과 공백은 손대지 않는다. 인자를 리스트로 넘기므로 공백은 문제가 되지 않는다.
+
+    한계: 폴더 이름에 쉼표나 작은따옴표가 들어 있으면 이 방식으로도 필터그래프 해석이
+    깨진다. 그래서 아래 _filter_paths()에서 아예 상대 경로를 쓰도록 해 두었다.
     """
     text = str(path).replace("\\", "/")
-    return "".join("\\" + ch if ch in _FILTER_SPECIALS else ch for ch in text)
+    return "".join("\\\\" + ch if ch in _FILTER_SPECIALS else ch for ch in text)
+
+
+def _filter_paths(ass_path: Path) -> tuple[str, str, str]:
+    r"""ass 필터에 넣을 (작업 폴더, 자막 파일 인자, fontsdir 인자)를 만든다.
+
+    절대 경로를 그대로 넣으면 드라이브 문자의 ':' 때문에 늘 이스케이프가 필요하고,
+    폴더 이름에 쉼표(예: "홍보영상, 최종")가 들어가면 이스케이프로도 못 막는다.
+    그래서 FFmpeg의 작업 폴더를 자막 파일이 있는 폴더로 지정하고, 필터에는
+    파일 이름과 상대 경로만 넣는다. 이러면 필터 문자열에 ':'가 아예 없어진다.
+    (폰트 폴더가 다른 드라이브에 있는 예외적인 경우에만 절대 경로로 되돌아간다.)
+    """
+    workdir = ass_path.parent
+    fonts_dir = Path(fonts_dir_for_ffmpeg())
+    try:
+        fonts_arg = os.path.relpath(fonts_dir, workdir)
+    except ValueError:  # 드라이브가 다르면 상대 경로를 만들 수 없다
+        fonts_arg = str(fonts_dir)
+    return str(workdir), _escape_filter_path(ass_path.name), _escape_filter_path(fonts_arg)
 
 
 def video_dimensions(path: str | Path) -> tuple[int, int]:
@@ -254,6 +280,8 @@ def _run_with_progress(
     total_seconds: float,
     report: Reporter,
     verb: str,
+    base: float = 0.0,
+    cwd: str | None = None,
 ) -> None:
     r"""FFmpeg을 돌리면서 실제 진척도를 읽어 report()로 넘긴다.
 
@@ -274,6 +302,7 @@ def _run_with_progress(
                 stdout=subprocess.PIPE,
                 stderr=err_file,
                 stdin=subprocess.DEVNULL,
+                cwd=cwd,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -282,7 +311,10 @@ def _run_with_progress(
         except OSError as exc:
             raise RenderError(f"영상 처리 도구를 실행하지 못했습니다: {exc}") from exc
 
-        report(0.0, f"{verb} (0초 / {_fmt_time(total)})")
+        # 준비 단계에서 이미 base 만큼 진행했으므로, 여기서는 base~1.0 구간만 채운다.
+        # (그냥 0부터 다시 세면 화면의 진행 막대가 뒤로 물러나 보인다)
+        span = max(0.0, 1.0 - base)
+        report(base, f"{verb} (0초 / {_fmt_time(total)})")
         use_us = False  # out_time_us 가 있으면 그걸 쓰고, 없으면 out_time_ms 를 쓴다
 
         try:
@@ -306,7 +338,10 @@ def _run_with_progress(
                     continue
 
                 fraction = min(done / total, 1.0)
-                report(fraction, f"{verb} ({_fmt_time(min(done, total))} / {_fmt_time(total)})")
+                report(
+                    base + span * fraction,
+                    f"{verb} ({_fmt_time(min(done, total))} / {_fmt_time(total)})",
+                )
 
             returncode = proc.wait(timeout=60)
         except JobCancelled:
@@ -375,12 +410,10 @@ def burn_subtitles(
     if not source.is_file():
         raise RenderError(f"영상 파일이 없습니다: {source}")
 
+    # N-05: 결과는 항상 '아직 없는' 새 파일에만 쓴다. 그래서 원본은 물론이고
+    # 이전에 내보낸 결과물도 절대 덮어쓰이지 않는다.
     out_folder = Path(out_dir)
     final_path = _unique_out_path(out_folder, out_name)
-
-    # N-05: 원본을 절대 건드리지 않는다
-    if final_path.resolve() == source.resolve():
-        raise RenderError("원본 영상에 덮어쓸 수 없습니다. 다른 이름으로 저장해 주세요.")
 
     report(0.01, "영상 정보를 확인하고 있습니다…")
 
@@ -395,9 +428,9 @@ def burn_subtitles(
     target_duration = min(full_duration, float(seconds)) if seconds else full_duration
 
     report(0.02, "자막 파일을 만들고 있습니다…")
-    ass_path = write_ass_file(
-        out_folder / (final_path.stem + ".ass"), segments, style, width, height
-    )
+    # 자막 파일 이름에서 필터 특수문자를 걸러 낸다 (이 이름은 필터 인자로 들어간다)
+    ass_stem = "".join("_" if ch in _FILTER_SPECIALS else ch for ch in final_path.stem)
+    ass_path = write_ass_file(out_folder / (ass_stem + ".ass"), segments, style, width, height)
 
     # 임시 이름으로 먼저 쓴다 — 실패하거나 취소되면 완성된 척하는 반쪽 파일이 남지 않는다 (N-05)
     tmp_path = out_folder / f".{final_path.stem}.tmp{final_path.suffix}"
@@ -405,10 +438,9 @@ def burn_subtitles(
 
     # 자막 필터를 쓰면 화면을 다시 그려야 하므로 영상 재인코딩이 필수다 (-c:v copy 불가).
     # 소리는 그대로 두므로 복사해서 시간을 아낀다.
-    subtitle_filter = (
-        f"ass={_escape_filter_path(ass_path)}"
-        f":fontsdir={_escape_filter_path(fonts_dir_for_ffmpeg())}"
-    )
+    # fontsdir로 번들 폰트 폴더를 알려 주지 않으면 한글이 네모(□)로 나온다 (R4).
+    workdir, ass_arg, fonts_arg = _filter_paths(ass_path)
+    subtitle_filter = f"ass={ass_arg}:fontsdir={fonts_arg}"
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(source)]
     if seconds:
@@ -427,7 +459,9 @@ def burn_subtitles(
 
     started = time.monotonic()
     try:
-        _run_with_progress(cmd, target_duration, report, "영상을 만들고 있습니다")
+        _run_with_progress(
+            cmd, target_duration, report, "영상을 만들고 있습니다", base=0.05, cwd=workdir
+        )
         if not tmp_path.is_file() or tmp_path.stat().st_size == 0:
             raise RenderError("영상이 만들어지지 않았습니다. 원본 파일을 확인해 주세요.")
         os.replace(tmp_path, final_path)  # 성공했을 때만 최종 이름으로 바꾼다

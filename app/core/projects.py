@@ -41,6 +41,9 @@ def _slugify(name: str) -> str:
     """
     name = unicodedata.normalize("NFC", name).strip()
     name = re.sub(r'[\\/:*?"<>|]+', "", name)  # 윈도우 금지 문자
+    # FFmpeg 필터 문법에서 구분자로 쓰이는 문자들. 폴더 이름에 들어가면 렌더링이 통째로
+    # 실패하는데 오류 메시지로는 원인을 찾을 수 없다 (memory/ffmpeg-filter-path-escaping.md)
+    name = re.sub(r"[,;\[\]']+", "", name)
     name = re.sub(r"\s+", "_", name)
     name = name.strip("._")
     return name[:40] or "프로젝트"

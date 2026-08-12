@@ -15,6 +15,7 @@ from app.api import audio as audio_api
 from app.api import jobs as jobs_api
 from app.api import media as media_api
 from app.api import projects as projects_api
+from app.api import render as render_api
 from app.api import styles as styles_api
 from app.api import system as system_api
 from app.api import tts as tts_api
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(tts_api.router)
     app.include_router(audio_api.router)
     app.include_router(jobs_api.router)
+    app.include_router(render_api.router)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

@@ -84,12 +84,16 @@ def _prune() -> None:
         _jobs.pop(job.id, None)
 
 
-def submit(kind: str, label: str, fn: Callable[..., Any], **kwargs: Any) -> str:
+def submit(kind: str, label: str, fn: Callable[..., Any], /, **kwargs: Any) -> str:
     """작업을 뒤에서 시작하고 작업 번호를 즉시 돌려준다.
 
     fn의 첫 번째 인자로 report(progress, message) 함수가 전달된다.
     fn 안에서 취소 여부를 확인하려면 report()를 부르면 된다 — 취소되었으면
     JobCancelled 예외가 올라간다.
+
+    앞의 세 인자에 붙은 `/` 는 "이름으로 넘길 수 없고 순서로만 넘긴다"는 뜻이다.
+    이게 없으면 실행할 함수가 kind나 label이라는 이름의 인자를 받을 때
+    "kind에 값이 두 번 들어왔다"는 오류가 난다.
     """
     job = Job(id=uuid.uuid4().hex[:12], kind=kind, label=label)
 
