@@ -1015,6 +1015,9 @@ function syncStyleInputs() {
   $("#shadow-val").textContent = Number(st.shadow.depth).toFixed(1);
   $("#bgop-val").textContent = Number(st.bg.opacity).toFixed(2);
 
+  // 프리셋을 바꾸면 위에서 색 값만 바뀌고 화면의 색 칩은 그대로 남는다. 함께 맞춰 준다.
+  if (typeof refreshColorPicks === "function") refreshColorPicks();
+
   const [x, y] = resolvedPosition(st);
   set("#style-pos-x", x.toFixed(1));
   set("#style-pos-y", y.toFixed(1));
@@ -2046,21 +2049,25 @@ function toggleAB() {
   const now = player.currentTime || 0;
   const btn = $("#btn-ab");
 
+  // 단추 글자에 'A', 'B' 같은 말을 쓰지 않는다. 지금 눌러야 할 일을 그대로 적는다.
   if (!abLoop) {
     abLoop = { start: now };
-    btn.textContent = `A ${fmtTime(now)} → B?`;
+    btn.textContent = "끝 지점 찍기";
+    btn.title = `시작 ${fmtTime(now)} — 반복하고 싶은 구간의 끝에서 다시 누르세요.`;
     btn.classList.add("is-on");
-    toast("구간 시작점을 찍었습니다. 끝점에서 한 번 더 누르세요.");
+    toast(`${fmtTime(now)} 를 시작으로 찍었습니다. 끝나는 곳에서 한 번 더 누르세요.`);
   } else if (abLoop.end === undefined) {
-    if (now <= abLoop.start + 0.2) { toast("끝점이 시작점보다 뒤여야 합니다.", { error: true }); return; }
+    if (now <= abLoop.start + 0.2) { toast("끝 지점은 시작보다 뒤여야 합니다.", { error: true }); return; }
     abLoop.end = now;
-    btn.textContent = "A-B 해제";
-    toast(`${fmtTime(abLoop.start)} ~ ${fmtTime(abLoop.end)} 구간을 반복합니다.`);
+    btn.textContent = "반복 끄기";
+    btn.title = `${fmtTime(abLoop.start)} ~ ${fmtTime(abLoop.end)} 구간을 되풀이하는 중입니다. 누르면 멈춥니다.`;
+    toast(`${fmtTime(abLoop.start)} ~ ${fmtTime(abLoop.end)} 구간을 되풀이합니다.`);
   } else {
     abLoop = null;
-    btn.textContent = "A-B 반복";
+    btn.textContent = "구간 반복";
+    btn.title = "같은 구간을 되풀이해 들으며 자막을 맞출 때 씁니다. 시작에서 한 번, 끝에서 한 번 누르세요.";
     btn.classList.remove("is-on");
-    toast("구간 반복을 껐습니다.");
+    toast("구간 되풀이를 껐습니다.");
   }
   renderABRegion();
 }
@@ -2110,11 +2117,197 @@ function wirePWA() {
   });
 }
 
+// ══ 색 고르기 ══════════════════════════════════════════════
+// 브라우저 기본 색 고르기 창은 스포이드가 다른 창 뒤로 숨고 다른 프로그램 위까지
+// 따라다녀 쓰기 어렵다. 자막에 쓰는 색은 몇 가지뿐이므로 칩과 색상 코드로 해결하고,
+// 기본 창은 [다른 색…]에만 남겨 둔다.
+// 대표 색만 칩으로 둔다. 그 밖의 색은 아래 색감표와 스포이드로 고른다.
+const SWATCHES = [
+  ["#FFFFFF", "흰색"], ["#000000", "검정"], ["#FFE14D", "노랑"], ["#FFB020", "주황"],
+  ["#FF6B6B", "빨강"], ["#7CD9FF", "하늘"], ["#8CE99A", "연두"], ["#FF9ECF", "분홍"],
+];
+
+// ── 색 계산 ────────────────────────────────────────────────
+function hsvToHex(h, s, v) {
+  const f = (n) => {
+    const k = (n + h / 60) % 6;
+    const x = v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+    return Math.round(x * 255).toString(16).padStart(2, "0");
+  };
+  return ("#" + f(5) + f(3) + f(1)).toUpperCase();
+}
+
+function hexToHsv(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return { h: 0, s: 0, v: 1 };
+  const n = parseInt(m[1], 16);
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h, s: max ? d / max : 0, v: max };
+}
+
+function buildColorPicks() {
+  document.querySelectorAll(".color-pick").forEach((box) => {
+    if (box.dataset.built) return;
+    const native = document.getElementById(box.dataset.target);
+    if (!native) return;
+
+    box.innerHTML =
+      `<div class="cp-sv" tabindex="0" role="application" aria-label="색감표: 끌어서 색을 고릅니다">` +
+      `<div class="cp-dot"></div></div>` +
+      `<div class="cp-hue" tabindex="0" role="slider" aria-label="색상 띠">` +
+      `<div class="cp-hue-dot"></div></div>` +
+      `<div class="cp-row">` +
+      `<span class="cp-preview" aria-hidden="true"></span>` +
+      `<input type="text" class="cp-hex" maxlength="7" spellcheck="false" placeholder="#RRGGBB" aria-label="색상 코드">` +
+      `<button type="button" class="btn btn-tiny cp-drop" title="화면 어디서든 색을 집어 옵니다">스포이드</button>` +
+      `</div>` +
+      `<div class="sw-row">` +
+      SWATCHES.map(([hex, name]) =>
+        `<button type="button" class="sw" data-c="${hex}" style="background:${hex}" title="${name}" aria-label="${name}"></button>`
+      ).join("") +
+      `</div>`;
+
+    const sv = box.querySelector(".cp-sv");
+    const hue = box.querySelector(".cp-hue");
+
+    // 색감표를 끌면 선명도(가로)와 밝기(세로)가 함께 정해진다
+    const pickSV = (e) => {
+      const r = sv.getBoundingClientRect();
+      const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+      const cur = hexToHsv(native.value);
+      setPickedColor(native, hsvToHex(cur.h, x, 1 - y));
+    };
+    const pickHue = (e) => {
+      const r = hue.getBoundingClientRect();
+      const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+      const cur = hexToHsv(native.value);
+      setPickedColor(native, hsvToHex(x * 360, cur.s || 1, cur.v || 1));
+    };
+    const dragWith = (el, handler) => {
+      el.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        el.setPointerCapture(e.pointerId);
+        handler(e);
+        const move = (ev) => handler(ev);
+        const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); };
+        el.addEventListener("pointermove", move);
+        el.addEventListener("pointerup", up);
+      });
+    };
+    dragWith(sv, pickSV);
+    dragWith(hue, pickHue);
+
+    box.querySelectorAll(".sw").forEach((sw) =>
+      sw.addEventListener("click", () => setPickedColor(native, sw.dataset.c))
+    );
+
+    const hexInput = box.querySelector(".cp-hex");
+    hexInput.addEventListener("change", () => {
+      let v = hexInput.value.trim();
+      if (v && !v.startsWith("#")) v = "#" + v;
+      if (/^#[0-9a-fA-F]{6}$/.test(v)) setPickedColor(native, v.toUpperCase());
+      else {
+        toast("색상 코드는 #RRGGBB 형식으로 넣어 주세요. 예: #FFE14D", { error: true });
+        refreshColorPicks();
+      }
+    });
+
+    // 스포이드 — 브라우저 색 창을 거치지 않고 우리 화면에서 바로 부른다.
+    // 화면 어디서든(다른 프로그램 위에서도) 색을 집을 수 있는 것이 이 도구의 쓸모다.
+    const drop = box.querySelector(".cp-drop");
+    if (!("EyeDropper" in window)) {
+      drop.disabled = true;
+      drop.title = "이 브라우저는 스포이드를 지원하지 않습니다. 색감표나 색상 코드를 써 주세요.";
+    } else {
+      drop.addEventListener("click", async () => {
+        try {
+          const res = await new window.EyeDropper().open();
+          if (res?.sRGBHex) setPickedColor(native, res.sRGBHex.toUpperCase());
+        } catch (_) {
+          /* 사용자가 Esc로 취소한 경우 — 아무것도 하지 않는다 */
+        }
+      });
+    }
+
+    native.addEventListener("input", refreshColorPicks);
+    box.dataset.built = "1";
+  });
+  refreshColorPicks();
+}
+
+function setPickedColor(native, hex) {
+  native.value = hex;
+  // 스타일을 실제로 반영하는 쪽은 기존 change 처리기다. 그대로 흘려보낸다.
+  native.dispatchEvent(new Event("change", { bubbles: true }));
+  refreshColorPicks();
+}
+
+function refreshColorPicks() {
+  document.querySelectorAll(".color-pick").forEach((box) => {
+    const native = document.getElementById(box.dataset.target);
+    if (!native) return;
+    const cur = (native.value || "#FFFFFF").toUpperCase();
+    const { h, s, v } = hexToHsv(cur);
+
+    const hexInput = box.querySelector(".cp-hex");
+    if (hexInput && document.activeElement !== hexInput) hexInput.value = cur;
+
+    const prev = box.querySelector(".cp-preview");
+    if (prev) prev.style.background = cur;
+
+    // 색감표의 바탕색을 지금 고른 색상(Hue)에 맞춘다
+    const sv = box.querySelector(".cp-sv");
+    if (sv) {
+      sv.style.setProperty("--hue", hsvToHex(h, 1, 1));
+      const dot = sv.querySelector(".cp-dot");
+      if (dot) {
+        dot.style.left = s * 100 + "%";
+        dot.style.top = (1 - v) * 100 + "%";
+        dot.style.background = cur;
+      }
+    }
+    const hueDot = box.querySelector(".cp-hue-dot");
+    if (hueDot) {
+      hueDot.style.left = (h / 360) * 100 + "%";
+      hueDot.style.background = hsvToHex(h, 1, 1);
+    }
+
+    box.querySelectorAll(".sw").forEach((sw) =>
+      sw.classList.toggle("is-active", sw.dataset.c.toUpperCase() === cur)
+    );
+  });
+}
+
+// ══ 눌렀다는 반응 ══════════════════════════════════════════
+function wirePressFeedback() {
+  // 켜짐/꺼짐이 있는 단추는 눌린 채로 남지만, 한 번 실행하고 끝나는 단추
+  // (문장 나누기 미리보기 등)는 남길 상태가 없다. 그래서 실행 직후 잠깐만
+  // 눌린 모습을 유지해 "눌렸다"는 것을 눈으로 확인할 수 있게 한다.
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".btn");
+    if (!btn || btn.disabled || btn.classList.contains("is-on")) return;
+    btn.classList.add("just-ran");
+    setTimeout(() => btn.classList.remove("just-ran"), 280);
+  });
+}
+
 // ══ 시작 ═══════════════════════════════════════════════════
 async function boot() {
   wireStartScreen();
   wireEditor();
   wirePWA();
+  wirePressFeedback();
+  buildColorPicks();
   setHelp("idle");
 
   try {

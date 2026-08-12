@@ -111,6 +111,33 @@ def check_ffmpeg() -> None:
         print()
 
 
+def port_state(host: str, port: int) -> str:
+    """그 주소를 이미 누가 쓰고 있는지 본다.
+
+    "free"  — 아무도 안 쓴다 (그냥 켜면 된다)
+    "ours"  — MovieFit Studio가 이미 돌고 있다
+    "other" — 다른 프로그램이 쓰고 있다
+    """
+    import socket
+
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        if s.connect_ex((host, port)) != 0:
+            return "free"
+
+    # 누군가 쓰고 있다. 우리 프로그램인지 물어본다.
+    import json
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/api/system/info", timeout=2) as res:
+            info = json.load(res)
+        return "ours" if isinstance(info, dict) else "other"
+    except (urllib.error.URLError, ValueError, TimeoutError, OSError):
+        return "other"
+
+
 def main() -> int:
     banner()
 
@@ -121,7 +148,32 @@ def main() -> int:
 
     from app.config import HOST, PORT
 
-    print(f"  주소: http://{HOST}:{PORT}")
+    url = f"http://{HOST}:{PORT}"
+
+    # 두 번 실행했을 때 아무 설명 없이 창이 닫히면 사용자는 이유를 알 수 없다.
+    # 무슨 일이 일어났는지 말해 주고, 이미 돌고 있으면 그 창을 열어 준다.
+    state = port_state(HOST, PORT)
+    if state == "ours":
+        import webbrowser
+
+        print("  MovieFit Studio가 이미 실행 중입니다.")
+        print("  새로 켜지 않고, 이미 열려 있는 것을 브라우저에 띄웁니다.")
+        print(f"  주소: {url}")
+        print()
+        print("  ※ 완전히 끄시려면 먼저 떠 있는 검은 창을 닫아 주세요.")
+        webbrowser.open(url)
+        return 0
+
+    if state == "other":
+        print(f"  [오류] 다른 프로그램이 이미 {url} 주소를 쓰고 있습니다.")
+        print("  MovieFit Studio를 켤 수 없습니다.")
+        print()
+        print("  이렇게 해 보세요:")
+        print("   1) 이전에 띄워 둔 MovieFit Studio 검은 창이 있으면 닫아 주세요.")
+        print("   2) 그래도 안 되면 컴퓨터를 다시 시작한 뒤 실행해 주세요.")
+        return 1
+
+    print(f"  주소: {url}")
     print("  잠시 후 브라우저가 자동으로 열립니다.")
     print("  ※ 이 검은 창을 닫으면 프로그램이 종료됩니다.")
     print()

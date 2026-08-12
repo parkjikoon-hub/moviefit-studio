@@ -16,19 +16,50 @@
 }
 
 :root {
-  --bg:        #17181C;
-  --bg-1:      #1E2026;
-  --bg-2:      #262932;
-  --bg-3:      #303541;
-  --line:      #33373F;
-  --text:      #E8EAED;
-  --text-dim:  #9AA0AA;
-  --accent:    #2DD4BF;
-  --accent-dk: #14B8A6;
-  --accent-bg: #0E3B37;
-  --warn:      #FBBF24;
-  --danger:    #F87171;
-  --radius:    10px;
+  /* 바탕 — 차가운 회색이 아니라 아주 옅게 따뜻한 검정.
+     같은 어두움이라도 푸른 기가 없으면 화면이 딱딱해 보이지 않는다. */
+  --bg:        #0D0C0B;   /* 가장 어두운 바닥 (화면 바탕·영상 둘레) */
+  --bg-1:      #131211;   /* 패널 바탕 */
+  --bg-2:      #24211E;   /* 박스·버튼 */
+  --bg-3:      #302C28;   /* 마우스를 올렸을 때 */
+  --bg-sink:   #080807;   /* 눌린(음각) 상태의 바닥 */
+
+  /* 테두리 — 네 단계.
+     바깥 상자는 진한 선으로 영역을 크게 나누고, 그 안의 단추·입력칸은 크림 선으로
+     하나하나를 구분한다. 굵기가 아니라 밝기 차이로 층을 만드는 방식이다. */
+  --line:       #2E2A26;   /* 잔선 (목록 구분 등) */
+  --line-2:     #4A443C;   /* 보통 구분선 */
+  --line-outer: #D8CFBC;   /* 바깥 상자 테두리 — 진한 크림, 2px로 굵게 쓴다 */
+  --line-cream: #8E8578;   /* 안쪽 단추·입력칸 테두리 — 한 단계 낮춰 대비를 만든다 */
+
+  --text:      #EDEAE3;
+  --text-dim:  #9A9287;
+
+  /* 강조색 = 크림 한 가지로 통일한다. 초록은 쓰지 않는다.
+     색을 하나로 줄이면 화면이 조용해지고, 정말 중요한 곳만 눈에 들어온다. */
+  --cream:     #E8E2D5;
+  --cream-dk:  #CFC7B5;
+  --cream-ink: #14120F;   /* 크림 바탕 위에 얹는 글자색 */
+
+  /* 예전 이름을 쓰던 자리들이 자동으로 크림을 따라오게 남겨 둔다 */
+  --accent:    var(--cream);
+  --accent-dk: var(--cream-dk);
+  --accent-bg: #2A2622;
+
+  --warn:      #D9A94E;
+  --danger:    #D46F6F;
+
+  /* 모서리는 거의 각지게. 둥근 모서리가 크면 화면이 물러 보인다. */
+  --radius:    3px;
+  --radius-sm: 2px;
+
+  /* 양각(솟은) / 음각(눌린) 표현.
+     버튼은 기본적으로 양각이고, 고른 뒤에는 크림색으로 채워지며 음각으로 유지된다.
+     크림 바탕 위에서는 같은 그림자가 너무 세 보이므로 따로 약한 값을 쓴다. */
+  --raise: inset 0 1px 0 rgba(255,255,255,.055), 0 1px 2px rgba(0,0,0,.5);
+  --press: inset 0 2px 5px rgba(0,0,0,.6), inset 0 -1px 0 rgba(255,255,255,.025);
+  --press-cream: inset 0 2px 5px rgba(0,0,0,.34), inset 0 -1px 0 rgba(255,255,255,.5);
+
   --font: "Pretendard", "Noto Sans KR", "Malgun Gothic", "맑은 고딕", system-ui, sans-serif;
 }
 
@@ -58,30 +89,62 @@ button, input, select, textarea {
 .view { height: 100%; }
 [hidden] { display: none !important; }
 
-/* ── 공통 버튼 ─────────────────────────────────────────── */
+/* ── 공통 버튼 ─────────────────────────────────────────────
+   기본은 양각(솟아 보임), 켜진 상태는 음각(눌린 채 유지).
+   "지금 눌러도 되는 것"과 "이미 고른 것"을 색이 아니라 입체로 구분한다.
+   색만으로 구분하면 색을 구별하기 어려운 사람에게는 아무 표시도 없는 셈이 된다. */
 .btn {
-  background: var(--bg-2); color: var(--text);
-  border: 1px solid var(--line); border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--bg-3) 0%, var(--bg-2) 100%);
+  color: var(--text);
+  border: 1px solid var(--line-2); border-radius: var(--radius);
   padding: 8px 14px; cursor: pointer; white-space: nowrap;
-  transition: background .12s, border-color .12s;
+  min-width: 96px;                 /* 크기를 맞춰 두면 줄이 가지런해 보인다 */
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  box-shadow: var(--raise);
+  transition: background .12s, border-color .12s, box-shadow .12s, color .12s;
 }
-.btn:hover:not(:disabled) { background: var(--bg-3); border-color: #454B57; }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { opacity: .4; cursor: default; }
-.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.btn-primary { background: var(--accent-dk); border-color: var(--accent-dk); color: #04201D; font-weight: 700; }
-.btn-primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
-.btn-ghost { background: transparent; }
-.btn.is-on { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); font-weight: 700; }
-.btn-wide { width: 100%; margin-top: 6px; }
-.btn-tiny { padding: 5px 10px; font-size: 13px; border-radius: 8px; }
-.btn-icon { padding: 6px 11px; }
+.btn:hover:not(:disabled) { background: linear-gradient(180deg, #3A3530 0%, #2A2622 100%); border-color: var(--line-cream); }
+/* 누르는 동안 크림으로 채워지며 들어간다.
+   한 번 실행하고 끝나는 단추(문장 나누기 미리보기 등)는 켜진 상태가 없으므로,
+   이 순간 반응이 "눌렸다"는 유일한 신호다. */
+.btn:active:not(:disabled) {
+  background: var(--cream); color: var(--cream-ink); border-color: var(--cream);
+  box-shadow: var(--press-cream); transform: translateY(1px);
+}
+/* 실행한 직후 잠깐 눌린 채로 남겨 눈이 따라올 시간을 준다 (app.js가 잠시 붙였다 뗀다) */
+.btn.just-ran {
+  background: var(--cream); color: var(--cream-ink); border-color: var(--cream);
+  box-shadow: var(--press-cream);
+}
+.btn:disabled { opacity: .35; cursor: default; box-shadow: none; }
+.btn:focus-visible { outline: 2px solid var(--cream); outline-offset: 2px; }
+
+/* 그 화면에서 가장 중요한 버튼 하나 — 크림으로 채워 눈에 먼저 들어오게 한다 */
+.btn-primary {
+  background: linear-gradient(180deg, var(--cream) 0%, var(--cream-dk) 100%);
+  border-color: var(--cream); color: var(--cream-ink); font-weight: 700;
+}
+.btn-primary:hover:not(:disabled) { background: var(--cream); border-color: #FFFBF2; }
+.btn-ghost { background: transparent; box-shadow: none; border-color: var(--line-2); }
+.btn-ghost:hover:not(:disabled) { background: var(--bg-2); box-shadow: var(--raise); }
+
+/* 켜진 채로 머무는 버튼 — 안이 크림으로 채워지고 눌린 자국이 그대로 남는다 */
+.btn.is-on {
+  background: var(--cream); border-color: var(--cream);
+  color: var(--cream-ink); font-weight: 700;
+  box-shadow: var(--press-cream); transform: none;
+}
+.btn.is-on:hover:not(:disabled) { background: var(--cream-dk); border-color: var(--cream); }
+
+.btn-wide { width: 100%; min-width: 0; margin-top: 6px; }
+.btn-tiny { padding: 5px 10px; font-size: 13px; min-width: 74px; border-radius: var(--radius-sm); }
+.btn-icon { padding: 6px 11px; min-width: 0; }
 .ic { display: inline-block; margin-right: 3px; opacity: .85; }
 
 .kbd {
   display: inline-block; padding: 1px 7px; margin: 0 1px;
   background: var(--bg-2); border: 1px solid var(--line);
-  border-bottom-width: 2px; border-radius: 5px;
+  border-bottom-width: 2px; border-radius: 2px;
   font-size: 12px; font-weight: 600; white-space: nowrap;
 }
 
@@ -89,17 +152,17 @@ button, input, select, textarea {
 #view-start { overflow-y: auto; }
 .start-wrap { max-width: 640px; margin: 0 auto; padding: 56px 24px 48px; }
 .start-head { text-align: center; margin-bottom: 32px; }
-.start-logo { border-radius: 18px; }
+.start-logo { border-radius: 4px; }
 .start-head h1 { margin: 14px 0 6px; font-size: 30px; letter-spacing: -0.5px; }
 .start-head .sub { margin: 0; color: var(--text-dim); }
 
 .drop-zone {
-  border: 2px dashed var(--line); border-radius: 16px;
+  border: 2px dashed var(--line); border-radius: 4px;
   padding: 40px 20px; text-align: center; cursor: pointer;
   background: var(--bg-1); transition: border-color .15s, background .15s;
 }
 .drop-zone:hover, .drop-zone:focus-visible, .drop-zone.is-over {
-  border-color: var(--accent); background: #1B2426; outline: none;
+  border-color: var(--accent); background: var(--accent-bg); outline: none;
 }
 .drop-icon { font-size: 34px; color: var(--accent); line-height: 1; }
 .drop-title { margin-top: 10px; font-size: 17px; font-weight: 700; }
@@ -139,23 +202,44 @@ button, input, select, textarea {
 /* ── 작업 화면 레이아웃 ─────────────────────────────────── */
 #view-editor { display: flex; flex-direction: column; }
 
+/* 왼쪽 / 가운데 / 오른쪽 세 구역. 가운데 칸은 내용만큼만 차지하고
+   양옆이 남는 자리를 똑같이 나눠 가지므로, 모드 단추가 늘 화면 한가운데 온다. */
 .topbar {
-  display: flex; align-items: center; gap: 12px; flex: none;
-  padding: 9px 14px; border-bottom: 1px solid var(--line); background: var(--bg-1);
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: 20px; flex: none;
+  padding: 9px 16px; border-bottom: 1px solid var(--line-2); background: var(--bg-1);
 }
+.tb-left  { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tb-right { display: flex; align-items: center; gap: 18px; justify-content: flex-end; }
 .project-name {
-  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; border: 1px solid transparent; border-radius: 3px;
   padding: 6px 10px; font-size: 15px; font-weight: 600; min-width: 180px;
 }
 .project-name:hover { border-color: var(--line); }
 .project-name:focus { border-color: var(--accent); outline: none; background: var(--bg); }
 
-.mode-switch { display: flex; background: var(--bg-2); border-radius: var(--radius); padding: 3px; }
-.mode-btn { background: transparent; border: 0; border-radius: 7px; padding: 6px 14px; cursor: pointer; color: var(--text-dim); }
-.mode-btn.is-active { background: var(--bg); color: var(--text); font-weight: 600; }
+/* 영상 모드 / 대본 모드 — 지금 어디에 있는지가 가장 중요하므로 크림색으로 뒤집는다 */
+.mode-switch {
+  display: flex; gap: 8px;                 /* 두 단추를 붙이지 않고 띄운다 */
+  background: var(--bg-sink); border: 1px solid var(--line-2);
+  border-radius: var(--radius); padding: 4px; box-shadow: var(--press);
+}
+.mode-btn {
+  min-width: 104px;                        /* 두 단추 너비를 같게 맞춘다 */
+  background: linear-gradient(180deg, var(--bg-3) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+  padding: 6px 16px; cursor: pointer; color: var(--text-dim);
+  box-shadow: var(--raise);
+  transition: background .12s, color .12s, box-shadow .12s, border-color .12s;
+}
+.mode-btn:hover:not(.is-active) { color: var(--text); border-color: var(--line-cream); }
+.mode-btn.is-active {
+  background: var(--cream); color: var(--cream-ink); font-weight: 700;
+  border-color: var(--cream); box-shadow: var(--press-cream);
+}
 
-.save-state { margin-left: auto; color: var(--text-dim); font-size: 12px; }
-.save-state.is-saving { color: var(--accent); }
+.save-state { color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+.save-state.is-saving { color: var(--cream); }
 
 /* 좌·우 패널 폭과 하단 높이는 사용자가 끌어서 바꾼다 (app.js가 이 값을 갱신한다) */
 #view-editor {
@@ -193,69 +277,155 @@ body.is-resizing * { pointer-events: none; }
 body.is-resizing .splitter { pointer-events: auto; }
 
 .panel { background: var(--bg-1); overflow-y: auto; min-height: 0; }
-.panel-left { border-right: 1px solid var(--line); }
-.panel-right { border-left: 1px solid var(--line); }
-.panel-body { padding: 14px; }
-.panel h3 {
-  font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: .3px;
-  margin: 20px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line);
+.panel-left { border-right: 1px solid var(--line-2); }
+.panel-right { border-left: 1px solid var(--line-2); }
+.panel-body { padding: 12px; }
+
+/* 각 묶음을 크림 테두리 상자로 감싼다.
+   어디서 시작해 어디서 끝나는지가 선 하나로 분명해진다. */
+/* 바깥 상자는 2px 진한 크림. 안쪽 단추 테두리(1px, 낮은 밝기)와 굵기·밝기가
+   모두 달라서 "이 상자 안에 이것들이 들어 있다"가 한눈에 읽힌다. */
+.grp {
+  border: 2px solid var(--line-outer);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  margin-bottom: 14px;
+  overflow: hidden;
 }
-.panel h3:first-child { margin-top: 0; }
+.grp:last-child { margin-bottom: 0; }
+
+/* 상자 머리 — 제목 줄 */
+.grp > h3 {
+  margin: 0; padding: 8px 12px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .5px;
+  color: var(--cream);
+  background: var(--bg-2);
+  border-bottom: 2px solid var(--line-outer);
+}
+.grp-body { padding: 12px; }
+/* 상자 안에서 마지막 요소의 아래 여백은 지운다 — 상자가 아래로 붕 뜨지 않게 */
+.grp-body > *:last-child { margin-bottom: 0; }
+
+/* 상자 밖에 남아 있는 제목(안내 카드 등)은 기존처럼 단순하게 */
+.panel h3 { font-size: 11.5px; color: var(--cream); font-weight: 700; }
 
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 9px; font-size: 12px; color: var(--text-dim); }
+/* 값을 적어 넣는 칸은 안쪽으로 들어가 보이게 한다.
+   솟은 것(버튼)은 누르는 것, 들어간 것(입력칸)은 쓰는 것 — 규칙을 하나로 지킨다. */
 .field select, .field input[type="number"], .field input[type="text"] {
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; color: var(--text);
+  background: var(--bg-sink); border: 1px solid var(--line-2); border-radius: var(--radius);
+  padding: 7px 9px; color: var(--text);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.5);
 }
-.field input[type="color"] { width: 100%; height: 30px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 2px; cursor: pointer; }
+.field select:focus, .field input[type="number"]:focus, .field input[type="text"]:focus {
+  border-color: var(--accent); outline: none;
+}
+.field input[type="color"] {
+  width: 100%; height: 30px; background: var(--bg-sink); border: 1px solid var(--line-2);
+  border-radius: var(--radius); padding: 2px; cursor: pointer;
+}
 .field input[type="range"] { width: 100%; accent-color: var(--accent); }
 .field .val { float: right; color: var(--text); font-variant-numeric: tabular-nums; }
 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; }
 .row-2 input[type="text"], .row-2 input[type="search"], .row-2 select {
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%;
+  background: var(--bg-sink); border: 1px solid var(--line); border-radius: 3px; padding: 7px 9px; width: 100%;
 }
 .chk { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-dim); margin: 6px 0 10px; cursor: pointer; }
 .chk input { accent-color: var(--accent); width: 15px; height: 15px; }
 .hint { color: var(--text-dim); font-size: 12px; margin: 8px 0 0; line-height: 1.6; }
-.file-info { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px; font-size: 12px; color: var(--text-dim); word-break: break-all; }
+.file-info { background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 9px; font-size: 12px; color: var(--text-dim); word-break: break-all; }
 
 .script-input {
   width: 100%; min-height: 200px; resize: vertical;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 3px;
   padding: 10px; line-height: 1.7;
 }
 .script-input:focus { border-color: var(--accent); outline: none; }
 .script-stats { font-size: 12px; color: var(--text-dim); margin: 6px 0 4px; text-align: right; }
 
-.tabs { display: flex; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg-1); z-index: 2; }
-.tab-btn { flex: 1; background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 11px 4px; cursor: pointer; color: var(--text-dim); }
-.tab-btn.is-active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tabs {
+  display: flex; border-bottom: 1px solid var(--line-2);
+  position: sticky; top: 0; background: var(--bg-1); z-index: 2;
+}
+.tab-btn {
+  flex: 1; background: transparent; border: 0; border-bottom: 2px solid transparent;
+  padding: 11px 4px; cursor: pointer; color: var(--text-dim);
+  transition: background .12s, color .12s;
+}
+.tab-btn:hover:not(.is-active) { color: var(--text); background: var(--bg-2); }
+/* 고른 탭은 안쪽으로 들어가 보이게 하고 아래에 강조선을 둔다 */
+.tab-btn.is-active {
+  color: var(--text); border-bottom-color: var(--accent); font-weight: 700;
+  background: var(--bg-sink); box-shadow: inset 0 2px 5px rgba(0,0,0,.5);
+}
 
-/* 프리셋 카드 */
+/* 골라서 켜 두는 것들 — 프리셋 카드, 토글, 위치 버튼.
+   모두 같은 규칙을 쓴다: 평소에는 솟아 있고, 고르면 눌린 채로 남는다. */
+.pick {
+  background: linear-gradient(180deg, var(--bg-3) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  cursor: pointer; color: var(--text-dim);
+  box-shadow: var(--raise);
+  transition: background .12s, border-color .12s, box-shadow .12s, color .12s;
+}
+.pick:hover { border-color: #4A515E; color: var(--text); }
+.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pick.is-active, .pick.is-on {
+  background: var(--cream); border-color: var(--cream);
+  color: var(--cream-ink); font-weight: 700; box-shadow: var(--press-cream);
+}
+
 .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .preset {
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  background: linear-gradient(180deg, var(--bg-3) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--line-2); border-radius: var(--radius);
   padding: 9px 6px; cursor: pointer; text-align: center; line-height: 1.3;
+  box-shadow: var(--raise);
+  transition: background .12s, border-color .12s, box-shadow .12s;
 }
-.preset:hover { border-color: var(--accent); }
-.preset.is-active { border-color: var(--accent); background: var(--accent-bg); }
+.preset:hover { border-color: var(--line-cream); }
+/* 고른 프리셋은 안이 크림으로 채워진 채 눌려 있다 */
+.preset.is-active {
+  border-color: var(--cream); background: var(--cream); box-shadow: var(--press-cream);
+}
+.preset.is-active .p-label { color: var(--cream-ink); }
+.preset.is-active .p-desc { color: #5A5348; }
 .preset .p-label { font-weight: 700; font-size: 13px; }
 .preset .p-desc { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 .preset .p-del { color: var(--text-dim); font-size: 11px; }
 
 .toggle-row { display: flex; gap: 7px; }
 .toggle {
-  flex: 1; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-  padding: 7px; cursor: pointer; color: var(--text-dim);
+  flex: 1; padding: 7px;
+  background: linear-gradient(180deg, var(--bg-3) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  cursor: pointer; color: var(--text-dim); box-shadow: var(--raise);
+  transition: background .12s, border-color .12s, box-shadow .12s, color .12s;
 }
-.toggle.is-on { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
+.toggle:hover { border-color: #4A515E; color: var(--text); }
+/* 굵게·기울임처럼 켜고 끄는 것은 크림색으로 뒤집어 한눈에 보이게 한다 */
+.toggle.is-on {
+  background: var(--cream); border-color: var(--cream); color: var(--cream-ink);
+  font-weight: 700; box-shadow: var(--press-cream);
+}
 
 .pos-preset { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
-.pos-btn { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; cursor: pointer; color: var(--text-dim); }
-.pos-btn.is-active { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
+.pos-btn {
+  padding: 8px;
+  background: linear-gradient(180deg, var(--bg-3) 0%, var(--bg-2) 100%);
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  cursor: pointer; color: var(--text-dim); box-shadow: var(--raise);
+  transition: background .12s, border-color .12s, box-shadow .12s, color .12s;
+}
+.pos-btn:hover { border-color: #4A515E; color: var(--text); }
+.pos-btn.is-active {
+  background: var(--cream); border-color: var(--cream); color: var(--cream-ink);
+  font-weight: 700; box-shadow: var(--press-cream);
+}
 
 /* 목소리 목록 */
 .voice-count { font-size: 12px; color: var(--text-dim); margin: 8px 0 6px; }
-.voice-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.voice-list { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); }
 .voice-item {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px;
   border-bottom: 1px solid var(--line); cursor: pointer;
@@ -265,18 +435,18 @@ body.is-resizing .splitter { pointer-events: auto; }
 .voice-item.is-active { background: var(--accent-bg); }
 .voice-item .v-label { flex: 1; font-size: 12px; line-height: 1.35; }
 .voice-item .v-native { color: var(--accent); font-size: 10px; font-weight: 700; }
-.voice-item .v-play { background: transparent; border: 1px solid var(--line); border-radius: 6px; color: var(--text-dim); cursor: pointer; padding: 3px 7px; font-size: 11px; }
+.voice-item .v-play { background: transparent; border: 1px solid var(--line); border-radius: 2px; color: var(--text-dim); cursor: pointer; padding: 3px 7px; font-size: 11px; }
 .voice-item .v-play:hover { border-color: var(--accent); color: var(--accent); }
 
-.myvoice-box { background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 11px; }
+.myvoice-box { background: var(--bg); border: 1px dashed var(--line); border-radius: 3px; padding: 11px; }
 
 .dict-list { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; }
-.dict-list li { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; margin-bottom: 5px; }
+.dict-list li { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 3px; margin-bottom: 5px; }
 .dict-list .d-del { margin-left: auto; background: none; border: 0; color: var(--text-dim); cursor: pointer; }
 .dict-list .d-del:hover { color: var(--danger); }
 
 /* ── 플레이어 ─────────────────────────────────────────── */
-.stage { display: flex; flex-direction: column; min-width: 0; background: #0F1013; }
+.stage { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
 .video-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; padding: 12px; }
 .video-box { position: relative; display: inline-block; max-width: 100%; max-height: 100%; line-height: 0; }
 
@@ -284,7 +454,7 @@ body.is-resizing .splitter { pointer-events: auto; }
    그래서 빈 상태에서는 상자를 화면 크기로 펼치고 문구를 가로로 고정한다. */
 .video-box.is-empty { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
 
-#player { max-width: 100%; max-height: 100%; background: #000; border-radius: 6px; display: block; }
+#player { max-width: 100%; max-height: 100%; background: #000; border-radius: 2px; display: block; }
 
 .no-video {
   position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
@@ -302,19 +472,19 @@ body.is-resizing .splitter { pointer-events: auto; }
   text-shadow: 0 0 3px #000, 0 0 3px #000;
 }
 .subtitle-overlay:empty { display: none; }
-.subtitle-overlay:hover { outline: 1px dashed rgba(45,212,191,.7); outline-offset: 5px; }
+.subtitle-overlay:hover { outline: 1px dashed rgba(232,226,213,.7); outline-offset: 5px; }
 .subtitle-overlay.is-dragging { cursor: grabbing; outline: 1px solid var(--accent); outline-offset: 5px; }
 
 .safe-area { position: absolute; inset: 0; pointer-events: none; }
 .safe-area::before {
   content: "쇼츠 UI 가림 영역"; position: absolute; left: 5%; right: 5%; top: 8%; bottom: 18%;
-  border: 1px dashed rgba(251,191,36,.55); border-radius: 4px;
+  border: 1px dashed rgba(251,191,36,.55); border-radius: 2px;
   color: rgba(251,191,36,.75); font-size: 10px; line-height: 1; padding: 3px;
 }
 
 .drag-readout {
   position: absolute; left: 8px; top: 8px; z-index: 3;
-  background: rgba(0,0,0,.78); border: 1px solid var(--accent); border-radius: 6px;
+  background: rgba(0,0,0,.78); border: 1px solid var(--accent); border-radius: 2px;
   padding: 4px 9px; font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.4;
 }
 
@@ -322,7 +492,7 @@ body.is-resizing .splitter { pointer-events: auto; }
 .time { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 13px; }
 .time-sep { color: var(--line); }
 .speed-wrap { margin-left: auto; font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
-.speed-wrap select { background: var(--bg-2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; }
+.speed-wrap select { background: var(--bg-2); border: 1px solid var(--line); border-radius: 3px; padding: 4px 7px; }
 .transport .chk { margin: 0; }
 
 /* ── 하단 (타임라인 + 목록) ─────────────────────────────── */
@@ -331,12 +501,15 @@ body.is-resizing .splitter { pointer-events: auto; }
 /* 타임라인 */
 .timeline-wrap { display: flex; height: var(--timeline-h); flex: none; border-bottom: 1px solid var(--line); min-height: 60px; }
 .tl-side {
-  width: 118px; flex: none; border-right: 1px solid var(--line);
+  width: 138px; flex: none; border-right: 2px solid var(--line-outer);
   padding: 8px; display: flex; flex-direction: column; gap: 7px; justify-content: center;
+  background: var(--bg-1); position: relative; z-index: 4;   /* 재생 위치 선이 이 위로 넘어오지 못하게 */
+  overflow: hidden;
 }
 .tl-label { font-size: 11px; color: var(--text-dim); font-weight: 600; }
+/* 좁은 자리에 놓이는 작은 단추들은 공통 최소 너비(96px)를 따르면 칸을 넘쳐 버린다 */
 .tl-zoom { display: flex; gap: 4px; }
-.tl-zoom .btn { padding: 3px 8px; font-size: 12px; }
+.tl-zoom .btn { padding: 3px 6px; font-size: 12px; min-width: 0; flex: 1; }
 
 .tl-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; position: relative; }
 .tl-inner { position: relative; height: 100%; min-width: 100%; }
@@ -356,13 +529,13 @@ body.is-resizing .splitter { pointer-events: auto; }
 .tl-clip {
   position: absolute; top: 11px; height: 40px;
   background: var(--accent-dk); border: 1px solid var(--accent);
-  border-radius: 5px; overflow: hidden; cursor: grab;
+  border-radius: 2px; overflow: hidden; cursor: grab;
   display: flex; align-items: center; padding: 0 6px;
-  font-size: 11px; color: #04201D; font-weight: 600;
+  font-size: 11px; color: var(--cream-ink); font-weight: 600;
   white-space: nowrap; text-overflow: ellipsis;
 }
 .tl-clip:hover { filter: brightness(1.12); }
-.tl-clip.is-active { background: var(--accent); box-shadow: 0 0 0 2px rgba(45,212,191,.35); }
+.tl-clip.is-active { background: var(--accent); box-shadow: 0 0 0 2px rgba(232,226,213,.35); }
 /* 읽기 속도 경고 — 목록의 색과 같은 기준을 쓴다 */
 .tl-clip.is-warn { background: var(--warn); border-color: #FCD34D; color: #3B2A00; }
 .tl-clip.is-toofast { background: var(--danger); border-color: #FCA5A5; color: #3B0A0A; }
@@ -381,7 +554,7 @@ body.is-resizing .splitter { pointer-events: auto; }
 .seg-toolbar { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .seg-search-wrap { display: flex; gap: 6px; align-items: center; }
 .seg-toolbar input[type="search"], .seg-toolbar input[type="text"] {
-  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; width: 170px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 6px 10px; width: 170px;
 }
 .tb-sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; }
 .seg-count { margin-left: auto; color: var(--text-dim); font-size: 12px; }
@@ -399,7 +572,7 @@ body.is-resizing .splitter { pointer-events: auto; }
 
 .seg-item {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px;
-  border: 1px solid transparent; border-radius: 8px; margin-bottom: 3px;
+  border: 1px solid transparent; border-radius: 3px; margin-bottom: 3px;
 }
 .seg-item:hover { background: var(--bg-2); }
 .seg-item.is-active { background: var(--accent-bg); border-color: var(--accent); }
@@ -409,12 +582,12 @@ body.is-resizing .splitter { pointer-events: auto; }
 
 .seg-times { display: flex; align-items: center; gap: 2px; flex: none; }
 .nudge {
-  background: var(--bg); border: 1px solid var(--line); border-radius: 5px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 2px;
   color: var(--text-dim); cursor: pointer; padding: 2px 5px; font-size: 10px; line-height: 1.4;
 }
 .nudge:hover { border-color: var(--accent); color: var(--accent); }
 .time-input {
-  width: 62px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  width: 62px; background: var(--bg); border: 1px solid var(--line); border-radius: 2px;
   padding: 3px 4px; font-size: 11px; text-align: center; font-variant-numeric: tabular-nums;
 }
 .time-input:focus { border-color: var(--accent); outline: none; }
@@ -422,10 +595,10 @@ body.is-resizing .splitter { pointer-events: auto; }
 
 .seg-text {
   flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line);
-  border-radius: 7px; padding: 6px 9px; resize: none; overflow: hidden;
+  border-radius: 3px; padding: 6px 9px; resize: none; overflow: hidden;
   line-height: 1.45; min-height: 32px; font-size: 13px;
 }
-.seg-text:focus { border-color: var(--accent); outline: none; background: #14161A; }
+.seg-text:focus { border-color: var(--accent); outline: none; background: var(--bg-sink); }
 
 .seg-meta { flex: none; width: 62px; text-align: right; font-size: 10px; color: var(--text-dim); line-height: 1.3; }
 .seg-meta .cps.is-fast { color: var(--warn); font-weight: 700; }
@@ -436,22 +609,22 @@ body.is-resizing .splitter { pointer-events: auto; }
 .seg-tts {
   flex-basis: 100%; display: flex; align-items: center; gap: 6px;
   margin: 5px 0 2px 38px; padding: 5px 8px;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 7px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 3px;
 }
 .seg-tts .tt-label { font-size: 11px; color: var(--text-dim); }
 .seg-tts .tt-voice {
-  background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px;
   padding: 3px 6px; font-size: 11px; max-width: 190px;
 }
 .seg-tts .tt-num {
   width: 58px; background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 6px; padding: 3px 5px; font-size: 11px; text-align: center;
+  border-radius: 2px; padding: 3px 5px; font-size: 11px; text-align: center;
 }
 .seg-tts .tt-play { padding: 3px 9px; font-size: 11px; margin-left: auto; }
 .seg-tts .tt-regen { padding: 3px 9px; font-size: 11px; border-color: var(--accent); color: var(--accent); }
 
 .narr-status {
-  margin-top: 8px; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+  margin-top: 8px; padding: 8px 10px; border-radius: 3px; font-size: 12px; line-height: 1.5;
   background: var(--accent-bg); border: 1px solid var(--accent); color: var(--text);
 }
 .narr-status.is-warn { background: #3A2A08; border-color: var(--warn); color: #FDE68A; }
@@ -466,7 +639,7 @@ body.is-resizing .splitter { pointer-events: auto; }
   background: rgba(0,0,0,.62); display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 .coach-card {
-  background: var(--bg-1); border: 1px solid var(--line); border-radius: 14px;
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 4px;
   padding: 24px; max-width: 520px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.6);
   max-height: 88vh; overflow-y: auto;
 }
@@ -481,7 +654,7 @@ body.is-resizing .splitter { pointer-events: auto; }
 .export-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .export-opt {
   width: 100%; text-align: left; cursor: pointer;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 3px;
 }
 .export-opt:hover:not(:disabled) { border-color: var(--accent); background: var(--bg-2); }
@@ -490,14 +663,14 @@ body.is-resizing .splitter { pointer-events: auto; }
 .eo-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
 .export-done {
   display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 12px;
-  background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 9px; font-size: 13px;
+  background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 3px; font-size: 13px;
 }
 .export-done span { flex: 1; word-break: break-all; }
 
 /* ── 진행률 표시 ───────────────────────────────────────── */
 .progress-box {
   position: fixed; right: 20px; bottom: 20px; z-index: 250; width: 380px; max-width: 90vw;
-  background: var(--bg-1); border: 1px solid var(--accent); border-radius: 12px;
+  background: var(--bg-1); border: 1px solid var(--accent); border-radius: 4px;
   padding: 14px 16px; box-shadow: 0 14px 40px rgba(0,0,0,.6);
 }
 .pg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
@@ -520,7 +693,141 @@ body.is-resizing .splitter { pointer-events: auto; }
   display: flex; align-items: center; gap: 12px;
 }
 .toast.is-error { border-color: var(--danger); color: #FCA5A5; }
-.toast .t-undo { background: transparent; border: 1px solid var(--accent); color: var(--accent); border-radius: 7px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+.toast .t-undo { background: transparent; border: 1px solid var(--accent); color: var(--accent); border-radius: 3px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+
+/* ── 색 고르기 ─────────────────────────────────────────────
+   브라우저 기본 색 고르기 창은 쓰지 않는다. 그 창은 우리 코드가 만든 것이 아니라
+   브라우저와 윈도우가 그리므로, 화면 뒤로 숨거나 다른 프로그램 위까지 따라다녀도
+   손을 댈 수 없다. 색 칩 20개와 색상 코드 입력만으로 고르게 한다.
+   (숨은 input은 기존 저장 구조를 그대로 쓰기 위한 값 보관용일 뿐, 열리지 않는다) */
+.color-native {
+  position: absolute; width: 0; height: 0; opacity: 0;
+  border: 0; padding: 0; pointer-events: none;
+}
+
+.color-pick { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+
+.sw-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.sw {
+  height: 22px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line-cream); border-radius: var(--radius);
+  box-shadow: var(--raise);
+  transition: box-shadow .12s, border-color .12s, transform .12s;
+}
+.sw:hover { border-color: var(--cream); transform: translateY(-1px); }
+/* 고른 색은 눌린 채로 남고 크림 테두리가 한 겹 더 둘린다 */
+.sw.is-active {
+  border-color: var(--cream);
+  box-shadow: var(--press-cream), 0 0 0 2px var(--cream);
+  transform: none;
+}
+.sw:focus-visible { outline: 2px solid var(--cream); outline-offset: 2px; }
+
+/* 색감표 — 가로는 선명함, 세로는 밝기.
+   두 겹의 그라데이션을 포개면 그림판의 색 고르기와 같은 표가 된다. */
+.cp-sv {
+  position: relative; height: 110px; cursor: crosshair;
+  border: 1px solid var(--line-cream); border-radius: var(--radius);
+  background:
+    linear-gradient(to top, #000, rgba(0,0,0,0)),
+    linear-gradient(to right, #FFF, var(--hue, #FF0000));
+  touch-action: none;
+}
+.cp-sv:focus-visible { outline: 2px solid var(--cream); outline-offset: 2px; }
+.cp-dot {
+  position: absolute; left: 100%; top: 0;
+  width: 13px; height: 13px; margin: -7px 0 0 -7px;
+  border: 2px solid #FFF; border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.7);
+  pointer-events: none;
+}
+
+/* 색상 띠 — 빨강에서 한 바퀴 돌아 다시 빨강으로 */
+.cp-hue {
+  position: relative; height: 15px; margin-top: 7px; cursor: pointer;
+  border: 1px solid var(--line-cream); border-radius: var(--radius);
+  background: linear-gradient(to right,
+    #F00 0%, #FF0 17%, #0F0 33%, #0FF 50%, #00F 67%, #F0F 83%, #F00 100%);
+  touch-action: none;
+}
+.cp-hue:focus-visible { outline: 2px solid var(--cream); outline-offset: 2px; }
+.cp-hue-dot {
+  position: absolute; top: 50%; left: 0;
+  width: 9px; height: 19px; margin: -10px 0 0 -5px;
+  border: 2px solid #FFF; border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.7);
+  pointer-events: none;
+}
+
+.cp-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.cp-preview {
+  width: 28px; height: 28px; flex: none;
+  border: 1px solid var(--line-cream); border-radius: var(--radius);
+}
+.cp-hex {
+  flex: 1; min-width: 0; height: 28px;
+  background: var(--bg-sink); border: 1px solid var(--line-cream);
+  border-radius: var(--radius); padding: 0 8px; color: var(--text);
+  font-variant-numeric: tabular-nums; text-transform: uppercase; font-size: 12px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.5);
+}
+.cp-hex:focus { border-color: var(--cream); outline: none; }
+.cp-drop { min-width: 0; height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
+
+/* 프리셋 저장 줄 — 이름 칸과 [저장] 단추의 높이를 같게 맞춘다 */
+.preset-save {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px;
+  margin-top: 12px; align-items: stretch;
+}
+.preset-save input {
+  height: 34px; min-width: 0;
+  background: var(--bg-sink); border: 1px solid var(--line-cream);
+  border-radius: var(--radius); padding: 0 10px; color: var(--text);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.5);
+}
+.preset-save input:focus { border-color: var(--cream); outline: none; }
+.preset-save .btn { height: 34px; min-width: 76px; padding: 0 14px; font-size: 13px; }
+
+/* ── 좁은 자리의 작은 단추들 ───────────────────────────────
+   공통 최소 너비(96px)는 도구 모음처럼 넉넉한 자리를 위한 값이다.
+   목록 안이나 타임라인 옆처럼 좁은 곳에서는 칸을 넘쳐 다른 요소를 밀어내므로
+   여기서 최소 너비를 풀어 준다. */
+.seg-actions .btn,
+.seg-tts .tt-play, .seg-tts .tt-regen,
+.transport .btn-tiny,
+.path-fallback .btn,
+.recent-item .btn { min-width: 0; }
+
+/* 자막 검색 칸은 다른 입력칸보다 또렷하게 — 자주 쓰는 자리다 */
+.seg-toolbar input[type="search"], .seg-toolbar input[type="text"] {
+  border: 2px solid var(--line-outer);
+}
+
+/* ── 테두리 층 정리 ───────────────────────────────────────
+   바깥 상자(.grp)는 진한 선, 그 안에 놓이는 단추와 입력칸은 크림 선을 쓴다.
+   두 층의 밝기가 다르므로 "이 상자 안에 이 단추들이 들어 있다"가 한눈에 읽힌다.
+   이 묶음은 앞의 규칙들을 덮어쓰기 위해 파일 끝에 둔다. */
+.btn, .mode-btn, .preset, .toggle, .pos-btn, .pick,
+.field select,
+.field input[type="number"], .field input[type="text"], .field input[type="color"],
+.row-2 input[type="text"], .row-2 input[type="search"], .row-2 select,
+.seg-toolbar input[type="search"], .seg-toolbar input[type="text"],
+.speed-wrap select, .time-input, .seg-text, .script-input,
+.voice-list, .file-info, .myvoice-box, .export-opt, .seg-tts,
+.seg-tts .tt-voice, .seg-tts .tt-num, .nudge, .kbd {
+  border-color: var(--line-cream);
+}
+
+/* 마우스를 올렸을 때는 한 단계 더 밝혀서 지금 가리키는 것을 알려 준다 */
+.btn:hover:not(:disabled), .mode-btn:hover:not(.is-active),
+.preset:hover, .toggle:hover, .pos-btn:hover, .pick:hover,
+.nudge:hover, .export-opt:hover:not(:disabled) {
+  border-color: var(--cream);
+}
+
+/* 입력칸에 글자를 넣는 중일 때도 크림으로 또렷하게 */
+.field select:focus, .field input:focus, .time-input:focus,
+.seg-text:focus, .script-input:focus { border-color: var(--cream); }
 
 /* 좁은 화면 대응 */
 @media (max-width: 1180px) {
