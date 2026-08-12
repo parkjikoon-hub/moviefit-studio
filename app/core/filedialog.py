@@ -18,16 +18,20 @@ _PICKER_CODE = r"""
 import sys, tkinter as tk
 from tkinter import filedialog
 
+KINDS = {
+    "media": ("영상 또는 오디오 파일 선택",
+              [("영상/오디오 파일", "*.mp4 *.mov *.mkv *.webm *.mp3 *.wav *.m4a"),
+               ("모든 파일", "*.*")]),
+    "subtitle": ("자막 파일 선택",
+                 [("자막 파일", "*.srt *.vtt *.ass *.ssa"), ("모든 파일", "*.*")]),
+}
+kind = sys.argv[1] if len(sys.argv) > 1 else "media"
+title, filetypes = KINDS.get(kind, KINDS["media"])
+
 root = tk.Tk()
 root.withdraw()
 root.attributes("-topmost", True)   # 브라우저 뒤에 숨지 않게 맨 앞으로
-path = filedialog.askopenfilename(
-    title="영상 또는 오디오 파일 선택",
-    filetypes=[
-        ("영상/오디오 파일", "*.mp4 *.mov *.mkv *.webm *.mp3 *.wav *.m4a"),
-        ("모든 파일", "*.*"),
-    ],
-)
+path = filedialog.askopenfilename(title=title, filetypes=filetypes)
 root.destroy()
 sys.stdout.write(path or "")
 """
@@ -37,11 +41,14 @@ class FileDialogUnavailable(Exception):
     """파일 선택 창을 띄울 수 없는 환경 (예: 화면 없는 서버)."""
 
 
-def ask_media_file(timeout: float = 300.0) -> str | None:
-    """파일 선택 창을 띄우고 선택된 경로를 돌려준다. 취소하면 None."""
+def ask_media_file(timeout: float = 300.0, kind: str = "media") -> str | None:
+    """파일 선택 창을 띄우고 선택된 경로를 돌려준다. 취소하면 None.
+
+    kind="media"면 영상·오디오, kind="subtitle"이면 자막 파일만 걸러 보여 준다.
+    """
     try:
         result = subprocess.run(
-            [sys.executable, "-c", _PICKER_CODE],
+            [sys.executable, "-c", _PICKER_CODE, kind],
             capture_output=True,
             text=True,
             encoding="utf-8",

@@ -1364,6 +1364,7 @@ function wireEditor() {
   $("#btn-stt").addEventListener("click", runSTT);
   $("#btn-export").addEventListener("click", openExportDialog);
   $("#btn-tts").addEventListener("click", runNarration);
+  $("#btn-import-srt").addEventListener("click", importSubtitleFile);
   $("#btn-to-script").addEventListener("click", () => {
     if (!segments().length) { toast("옮길 자막이 없습니다.", { error: true }); return; }
     project.script = segments().map((s) => s.text).filter(Boolean).join("\n");
@@ -1522,6 +1523,31 @@ async function runSTT() {
     toast("말소리를 찾지 못했습니다. 소리가 너무 작거나 음악만 있는 영상일 수 있습니다.", { error: true });
   } else {
     toast(`자막 ${project.segments.length}개를 만들었습니다. 이제 글자를 다듬어 보세요.`);
+  }
+}
+
+// ══ 자막 파일 가져오기 (F-04) ══════════════════════════════
+async function importSubtitleFile() {
+  if (segments().length && !confirm(
+    `이미 자막 ${segments().length}개가 있습니다.\n파일을 가져오면 지금 자막을 모두 덮어씁니다.\n\n계속할까요?`)) {
+    return;
+  }
+
+  let picked;
+  try {
+    picked = await api("/api/system/pick-file?kind=subtitle", { method: "POST" });
+  } catch (err) { toast(err.message, { error: true }); return; }
+  if (picked.cancelled) return;
+
+  try {
+    const result = await api(`/api/projects/${encodeURIComponent(project.id)}/subtitles/import`, {
+      method: "POST",
+      body: JSON.stringify({ path: picked.path }),
+    });
+    await reloadProjectFromServer();
+    toast(`자막 ${result.count}개를 가져왔습니다.`);
+  } catch (err) {
+    toast(err.message, { error: true });
   }
 }
 

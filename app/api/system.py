@@ -18,11 +18,20 @@ from app.core import projects as store
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 
+SUBTITLE_EXTS = {".srt", ".vtt", ".ass", ".ssa"}
+
+
 @router.post("/pick-file")
-def pick_file() -> dict[str, Any]:
-    """윈도우 기본 파일 선택 창을 띄워 영상/오디오 경로를 받아온다."""
+def pick_file(kind: str = "media") -> dict[str, Any]:
+    """윈도우 기본 파일 선택 창을 띄워 파일 경로를 받아온다.
+
+    kind="media"면 영상·오디오, kind="subtitle"이면 자막 파일을 고르게 한다.
+    """
+    if kind not in ("media", "subtitle"):
+        raise HTTPException(400, "kind는 media 또는 subtitle이어야 합니다.")
+
     try:
-        path = filedialog.ask_media_file()
+        path = filedialog.ask_media_file(kind=kind)
     except filedialog.FileDialogUnavailable as exc:
         raise HTTPException(500, str(exc)) from exc
 
@@ -30,8 +39,9 @@ def pick_file() -> dict[str, Any]:
         return {"path": None, "cancelled": True}
 
     p = Path(path)
-    if p.suffix.lower() not in MEDIA_EXTS:
-        allowed = ", ".join(sorted(MEDIA_EXTS))
+    allowed_exts = SUBTITLE_EXTS if kind == "subtitle" else MEDIA_EXTS
+    if p.suffix.lower() not in allowed_exts:
+        allowed = ", ".join(sorted(allowed_exts))
         raise HTTPException(400, f"지원하지 않는 형식입니다. 가능한 확장자: {allowed}")
 
     return {"path": str(p), "name": p.name, "size": p.stat().st_size, "cancelled": False}
