@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import email.message
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
@@ -25,6 +26,21 @@ if hasattr(sys.stdout, "reconfigure"):
 
 BASE = "http://127.0.0.1:8765"
 SAMPLE_VIDEO = ROOT / "tests" / "sample" / "sample_10s.mp4"
+
+# 프로젝트가 저장될 수 있는 곳. 개발 서버는 앞쪽, 설치본은 뒤쪽에 저장한다.
+PROJECT_ROOTS = [
+    ROOT / "projects",
+    Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "MovieFit Studio" / "projects",
+]
+
+
+def find_project_json(project_id: str) -> Path | None:
+    """프로젝트 저장 파일을 두 곳에서 찾는다. 없으면 None."""
+    for root in PROJECT_ROOTS:
+        candidate = root / project_id / "project.json"
+        if candidate.is_file():
+            return candidate
+    return None
 
 passed = 0
 failed = 0
@@ -118,9 +134,13 @@ def main() -> int:
     check("저장 내용 유지 — 한글 자막", reloaded["segments"][0]["text"] == "첫 번째 자막입니다.")
     check("저장 내용 유지 — 스타일", reloaded["style"]["size"] == 55)
 
-    # 서버를 껐다 켜도 남는지는 파일이 실제로 있는지로 확인한다
-    json_path = ROOT / "projects" / project_id / "project.json"
-    check("디스크에 project.json 존재", json_path.is_file(), str(json_path))
+    # 서버를 껐다 켜도 남는지는 파일이 실제로 있는지로 확인한다.
+    # 이 점검을 설치본(바탕화면 아이콘으로 띄운 것)에 대고 돌릴 수도 있는데,
+    # 설치본은 자기 설치 폴더에 저장하므로 개발 폴더만 보면 "없다"고 잘못 판정한다.
+    # 그래서 두 곳을 모두 살핀다.
+    json_path = find_project_json(project_id)
+    check("디스크에 project.json 존재", json_path is not None,
+          str(json_path) if json_path else f"{' 와 '.join(str(r) for r in PROJECT_ROOTS)} 어디에도 없음")
 
     status, _, raw = request("/api/projects")
     ids = [p["id"] for p in as_json(raw)["projects"]]
