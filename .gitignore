@@ -25,3 +25,6 @@ assets/fonts/*.ttf
 .idea/
 .DS_Store
 Thumbs.db
+
+# Vercel 배포 캐시
+landing/.vercel/

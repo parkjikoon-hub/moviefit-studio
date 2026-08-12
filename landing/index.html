@@ -314,11 +314,11 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
     <div class="wrap">
       <p class="eyebrow">기능</p>
       <h2>무엇을 할 수 있나</h2>
-      <p class="lead">현재 개발이 진행 중인 프로젝트입니다. 이미 동작하는 항목과 계획된 항목을 구분해 표시했습니다.</p>
+      <p class="lead">아래 항목은 실제로 동작하며 자동 점검을 통과한 것들입니다. 아직 만들지 않은 것은 <span class="tag">계획</span>으로 따로 표시했습니다.</p>
       <div class="grid grid-2">
 
         <div class="feat">
-          <h3>영상 → 자막 <span class="tag now">개발 중</span></h3>
+          <h3>영상 → 자막 <span class="tag now">동작</span></h3>
           <ul>
             <li>영상(mp4·mov·mkv·webm)과 오디오(mp3·wav·m4a) 불러오기</li>
             <li>컴퓨터 안에서 도는 Whisper로 자동 음성 인식 (한국어·영어·자동 감지)</li>
@@ -329,49 +329,54 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
         </div>
 
         <div class="feat">
-          <h3>자막 편집기 <span class="tag now">개발 중</span></h3>
+          <h3>자막 편집기 <span class="tag now">동작</span></h3>
           <ul>
             <li>목록에서 글자를 바로 고치는 인라인 편집</li>
-            <li>세그먼트 추가·삭제·병합, 커서 위치 기준 분할</li>
-            <li>시작·끝 시간 ±0.1초 넛지 버튼과 직접 입력</li>
-            <li>목록의 한 줄을 클릭하면 영상이 그 시점으로 이동</li>
-            <li>재생 중인 자막이 화면 위에 실시간으로 표시</li>
-            <li><span class="tag">계획</span> 찾기·바꾸기, 실행 취소/다시 실행(Ctrl+Z/Y)</li>
-            <li><span class="tag">계획</span> 사용자 사전 — 자주 틀리는 고유명사 자동 교정</li>
+            <li>자막 추가·삭제·합치기, 커서 위치에서 나누기</li>
+            <li>시작·끝 시간 ±0.1초 버튼과 직접 입력</li>
+            <li>아래쪽 타임라인에서 막대를 끌어 시간 조절, 소리 파형 표시</li>
+            <li>읽기 속도가 너무 빠른 자막을 색으로 경고, [자막 검사]로 문제 일괄 점검</li>
+            <li>찾기·바꾸기, 되돌리기/다시하기, 전체 시간 밀기</li>
+            <li>사용자 사전 — 자주 틀리는 고유명사 자동 교정</li>
+            <li>말이 끊기는 곳을 찾아 자동으로 나누기, 스페이스바로 타이밍 찍기</li>
           </ul>
         </div>
 
         <div class="feat">
-          <h3>AI 나레이션 (TTS) <span class="tag now">개발 중</span></h3>
+          <h3>AI 나레이션 (TTS) <span class="tag now">동작</span></h3>
           <ul>
             <li>대본 붙여넣기 → 문장별로 나누어 음성 생성</li>
-            <li>마이크로소프트 Edge 신경망 음성 사용 (한국어·영어, 무료)</li>
-            <li>음성 3초 미리듣기, 전체 속도 조절, 문장 사이 간격 설정</li>
+            <li>마이크로소프트 Edge 신경망 음성 — 한국어로 쓸 수 있는 목소리 14종, 무료</li>
+            <li>목소리 미리듣기, 속도·높낮이·크기 조절, 문장 사이 간격 설정</li>
             <li><strong>자막 시간 자동 계산</strong> — 각 문장 음성의 실제 길이 기준</li>
-            <li><span class="tag">계획</span> 한 문장만 고쳐서 그 문장만 다시 생성 (이후 시간 자동 재계산)</li>
-            <li><span class="tag">계획</span> 만든 자막을 나레이션용 대본으로 바로 전환</li>
+            <li>한 문장만 고쳐서 그 문장만 다시 생성 (이후 시간 자동 재계산)</li>
+            <li>문장마다 다른 목소리·속도·쉼 지정</li>
+            <li>만든 자막을 나레이션용 대본으로 바로 전환</li>
+            <li><span class="tag">계획</span> 내 목소리를 등록해 그 목소리로 나레이션</li>
           </ul>
         </div>
 
         <div class="feat">
-          <h3>내보내기 <span class="tag now">개발 중</span></h3>
+          <h3>내보내기 <span class="tag now">동작</span></h3>
           <ul>
-            <li>SRT 자막 파일 — 유튜브·프리미어 등 다른 도구에서 그대로 사용</li>
-            <li>자막을 영상에 새겨 넣은 mp4 (한글 폰트 포함)</li>
+            <li>SRT·VTT 자막 파일 — 유튜브·프리미어 등에서 그대로 사용</li>
+            <li>SRT·VTT 파일 가져오기</li>
+            <li>자막을 영상에 새겨 넣은 mp4 (한글 폰트 함께 제공)</li>
+            <li>10초 미리보기 — 전체를 만들기 전에 자막 모양 확인</li>
             <li>나레이션 오디오 단독 저장 (mp3 / wav)</li>
-            <li>영상에 나레이션 입히기 — 원본 소리 볼륨 0~100% 조절</li>
-            <li><span class="tag">계획</span> VTT 내보내기, SRT·VTT 가져오기</li>
-            <li><span class="tag">계획</span> 진행률 표시와 완료 후 저장 폴더 열기</li>
+            <li>영상에 나레이션 입히기 — 원본 소리 볼륨 0~100% 조절, 자동 덕킹</li>
+            <li>진행률 표시와 완료 후 저장 폴더 열기</li>
           </ul>
         </div>
 
         <div class="feat">
-          <h3>자막 스타일 <span class="tag">계획</span></h3>
+          <h3>자막 스타일 <span class="tag now">동작</span></h3>
           <ul>
             <li>프리셋 5종: 기본 / 예능 / 뉴스 하단바 / 미니멀 / 강조</li>
-            <li>폰트·크기·색·외곽선·그림자·반투명 배경 박스</li>
-            <li>자막 위치(위·가운데·아래)와 정렬</li>
-            <li>바꾸는 즉시 미리보기 화면에 반영, 내 프리셋으로 저장</li>
+            <li>글꼴·크기·자간·줄간격·색·외곽선·그림자·반투명 배경 박스</li>
+            <li><strong>자막을 마우스로 끌어 원하는 자리에 배치</strong> — 영상에 새길 때도 같은 자리</li>
+            <li>세로 영상(쇼츠·릴스)용 한 번에 맞추기, 가려지는 영역 안내선</li>
+            <li>바꾸는 즉시 미리보기에 반영, 내 프리셋으로 저장</li>
           </ul>
         </div>
 
@@ -386,7 +391,11 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
         </div>
 
       </div>
-      <p class="note">현재 상태: 뼈대 단계를 마치고 자막 생성·편집과 나레이션 기능을 순서대로 만들고 있습니다. 최신 진행 상황은 GitHub 저장소의 <code>docs/ROADMAP.md</code>에서 확인하실 수 있습니다.</p>
+      <p class="note">현재 상태 (2026년 8월 12일): 자막 생성·편집, 나레이션, 스타일, 내보내기까지 모두 동작합니다.
+        자동 점검 123개 항목을 통과했고, 각 단계마다 별도의 검증 과정을 거쳐 발견된 문제를 고쳤습니다.
+        다만 마우스·키보드로만 쓰는 일부 동작은 자동 점검이 닿지 않아 직접 써 보며 다듬는 중입니다.
+        남은 계획은 내 목소리 나레이션과 사용자 설명서입니다.
+        최신 진행 상황과 검증 근거는 GitHub 저장소의 <code>docs/ROADMAP.md</code>에 적어 두었습니다.</p>
     </div>
   </section>
 
@@ -466,7 +475,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
 
         <details>
           <summary>이미 만들어 둔 자막 파일을 불러올 수 있나요?</summary>
-          <div class="answer">SRT 내보내기는 우선 개발 대상이고, SRT·VTT 가져오기는 그 다음 단계로 계획되어 있습니다. 다른 도구와 파일을 자유롭게 주고받는 것이 이 프로젝트의 목표 중 하나입니다.</div>
+          <div class="answer">SRT와 VTT 모두 내보내기·가져오기가 됩니다. 다른 도구와 파일을 자유롭게 주고받는 것이 이 프로젝트의 목표 중 하나입니다.</div>
         </details>
       </div>
     </div>
