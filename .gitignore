@@ -7,6 +7,11 @@ venv/
 
 # 사용자 작업물 — 저장소에 올리지 않는다
 projects/
+# 프로젝트 폴더에 잠깐 놓아 둔 음성·영상 파일이 실수로 공개되는 것을 막는다.
+# (실제로 목소리 견본 mp3 7개가 저장소 맨 위에 올라간 적이 있다)
+/*.mp3
+/*.wav
+/*.mp4
 tests/sample/*.mp4
 tests/sample/*.wav
 tests/sample/*.mp3
