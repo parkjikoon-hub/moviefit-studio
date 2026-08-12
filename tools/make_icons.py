@@ -96,9 +96,15 @@ def main() -> None:
         img.save(out)
         made.append(out.name)
 
-    # favicon.ico (여러 해상도를 한 파일에 담는다)
-    ico = _draw_icon(64)
-    ico.save(ICON_DIR / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
+    # favicon.ico — 브라우저 탭뿐 아니라 **바탕화면·시작 메뉴 아이콘**으로도 쓰인다.
+    # 윈도우는 보기 설정에 따라 48·96·256 픽셀로 그리므로 256까지 담아야 한다.
+    # 64까지만 담으면 큰 아이콘 보기에서 늘려 그려져 흐릿해진다.
+    # 원본을 256으로 그려야 각 크기가 선명하게 줄어든다 (작게 그린 것을 키우면 뭉개진다).
+    ico = _draw_icon(256)
+    ico.save(
+        ICON_DIR / "favicon.ico",
+        sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+    )
     made.append("favicon.ico")
 
     print("생성한 아이콘 파일:")
