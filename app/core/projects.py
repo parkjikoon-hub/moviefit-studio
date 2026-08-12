@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -107,11 +108,71 @@ def load_project(project_id: str) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+BACKUP_DIR = "backups"
+BACKUP_KEEP = 10  # 최근 몇 개를 남길지
+
+
+def _rotate_backup(pdir: Path) -> None:
+    """저장 직전의 내용을 backups/ 에 복사해 두고, 오래된 것부터 지운다.
+
+    실수로 자막을 전부 지우거나 잘못 덮어썼을 때 되돌릴 수 있는 마지막 안전장치다.
+    """
+    current = pdir / PROJECT_FILE
+    if not current.is_file():
+        return
+
+    backups = pdir / BACKUP_DIR
+    backups.mkdir(parents=True, exist_ok=True)
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    try:
+        shutil.copy2(current, backups / f"project_{stamp}.json")
+    except OSError:
+        return  # 백업 실패가 저장 자체를 막아서는 안 된다
+
+    saved = sorted(backups.glob("project_*.json"))
+    for old in saved[:-BACKUP_KEEP]:
+        old.unlink(missing_ok=True)
+
+
+def list_backups(project_id: str) -> list[dict[str, Any]]:
+    """되돌릴 수 있는 백업 목록 (최신순)."""
+    backups = project_dir(project_id) / BACKUP_DIR
+    if not backups.is_dir():
+        return []
+    items = []
+    for path in sorted(backups.glob("project_*.json"), reverse=True):
+        stat = path.stat()
+        items.append(
+            {
+                "file": path.name,
+                "saved_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "size": stat.st_size,
+            }
+        )
+    return items
+
+
+def restore_backup(project_id: str, filename: str) -> dict[str, Any]:
+    """백업 하나를 현재 프로젝트로 되돌린다."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise ProjectNotFound(f"잘못된 백업 이름입니다: {filename}")
+
+    path = project_dir(project_id) / BACKUP_DIR / filename
+    if not path.is_file():
+        raise ProjectNotFound(f"백업 파일을 찾을 수 없습니다: {filename}")
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return save_project(project_id, data)
+
+
 def save_project(project_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """project.json에 기록한다. 저장 도중 프로그램이 죽어도 원본이 깨지지 않도록
-    임시 파일에 먼저 쓰고 교체한다."""
+    임시 파일에 먼저 쓰고 교체한다. 덮어쓰기 전 내용은 backups/ 에 남긴다."""
     pdir = project_dir(project_id)
     pdir.mkdir(parents=True, exist_ok=True)
+
+    _rotate_backup(pdir)
 
     data["id"] = project_id
     data["version"] = SCHEMA_VERSION

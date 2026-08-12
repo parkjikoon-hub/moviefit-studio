@@ -10,6 +10,8 @@ projects/
 tests/sample/*.mp4
 tests/sample/*.wav
 tests/sample/*.mp3
+# 샘플 나레이션 음성은 tools/make_sample.py 로 각자 만든다 (용량 절약)
+tests/sample/narration/
 
 # 번들 폰트는 용량이 커서 tools/fetch_font.py 로 각자 받게 한다
 assets/fonts/*.otf

@@ -183,8 +183,53 @@ def main() -> int:
     check("manifest에 아이콘 4종", len(manifest["icons"]) == 4)
     check("manifest 설치 모드", manifest["display"] == "standalone")
 
+    # ── 스타일·글꼴·목소리 ──────────────────────────────
+    print("\n[6] 자막 스타일과 목소리")
+    status, _, raw = request("/api/styles/presets")
+    data = as_json(raw)
+    check("프리셋 5종", status == 200 and len(data["builtin"]) == 5, f"{len(data['builtin'])}개")
+    check("프리셋에 자유 위치 항목", "position" in data["builtin"][0]["style"])
+
+    status, _, raw = request("/api/styles/fonts")
+    fonts = as_json(raw)["fonts"]
+    check("글꼴 목록", status == 200 and len(fonts) > 0, f"{len(fonts)}개")
+    check("번들 폰트 포함", any(f["bundled"] for f in fonts))
+
+    status, _, raw = request("/api/tts/voices?korean_only=true")
+    voices = as_json(raw)
+    check("한국어 가능 목소리", status == 200 and voices["korean_capable_count"] >= 3,
+          f"전용 {voices['korean_native_count']}개 / 가능 {voices['korean_capable_count']}개")
+
+    # ── 소리 분석 (파형·무음) ───────────────────────────
+    print("\n[7] 소리 분석 — 타이밍 보조 기능")
+    status, _, raw = request(f"/api/audio/waveform/{project_id}?buckets=500")
+    if check("파형 데이터", status == 200, f"HTTP {status}"):
+        wave = as_json(raw)
+        check("요청한 개수만큼 반환", len(wave["peaks"]) == 500, f"{len(wave['peaks'])}개")
+        check("값이 0~1 범위", all(0.0 <= p <= 1.0 for p in wave["peaks"]))
+        check("소리가 실제로 감지됨", max(wave["peaks"]) > 0.1, f"최대 {max(wave['peaks']):.3f}")
+
+    status, _, raw = request(f"/api/audio/silence/{project_id}")
+    if check("무음 감지", status == 200, f"HTTP {status}"):
+        regions = as_json(raw)["regions"]
+        check("말소리 구간 검출", len(regions) >= 1, f"{len(regions)}개 구간")
+
+    # ── 자동 백업 ───────────────────────────────────────
+    print("\n[8] 자동 백업 — 실수해도 되돌릴 수 있는가")
+    reloaded["segments"] = []  # 실수로 전부 지운 상황을 흉내 낸다
+    request(f"/api/projects/{project_id}", "PUT", reloaded)
+
+    status, _, raw = request(f"/api/projects/{project_id}/backups")
+    backups = as_json(raw)["backups"]
+    if check("백업 목록 조회", status == 200 and len(backups) >= 1, f"{len(backups)}개"):
+        newest = backups[0]["file"]
+        status, _, raw = request(f"/api/projects/{project_id}/backups/{newest}/restore", "POST")
+        restored = as_json(raw)
+        check("백업에서 되돌리기", status == 200 and len(restored["segments"]) == 2,
+              f"자막 {len(restored['segments'])}개 복구")
+
     # ── 뒷정리 ──────────────────────────────────────────
-    print("\n[6] 뒷정리")
+    print("\n[9] 뒷정리")
     status, _, _ = request(f"/api/projects/{project_id}", "DELETE")
     check("테스트 프로젝트 삭제", status == 204, f"HTTP {status}")
 

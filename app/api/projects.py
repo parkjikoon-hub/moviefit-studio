@@ -61,6 +61,25 @@ def put_project(project_id: str, data: dict[str, Any]) -> dict[str, Any]:
     return store.save_project(project_id, data)
 
 
+@router.get("/{project_id}/backups")
+def get_backups(project_id: str) -> dict[str, Any]:
+    """되돌릴 수 있는 자동 백업 목록 (저장할 때마다 최근 10개를 남긴다)."""
+    try:
+        store.load_project(project_id)
+    except store.ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"backups": store.list_backups(project_id)}
+
+
+@router.post("/{project_id}/backups/{filename}/restore")
+def restore_backup(project_id: str, filename: str) -> dict[str, Any]:
+    """백업 하나를 현재 프로젝트로 되돌린다."""
+    try:
+        return store.restore_backup(project_id, filename)
+    except store.ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.delete("/{project_id}", status_code=204)
 def remove_project(project_id: str) -> None:
     try:

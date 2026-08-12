@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
+from app.api import audio as audio_api
 from app.api import media as media_api
 from app.api import projects as projects_api
 from app.api import styles as styles_api
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(system_api.router)
     app.include_router(styles_api.router)
     app.include_router(tts_api.router)
+    app.include_router(audio_api.router)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

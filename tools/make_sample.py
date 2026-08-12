@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -20,7 +21,7 @@ if hasattr(sys.stdout, "reconfigure"):
 SAMPLE_VIDEO = SAMPLE_DIR / "sample_10s.mp4"
 SAMPLE_SCRIPT = SAMPLE_DIR / "sample_script.txt"
 
-SCRIPT_TEXT = """안녕하세요. 캡컷 스튜디오 테스트 대본입니다.
+SCRIPT_TEXT = """안녕하세요. 무비핏 스튜디오 테스트 대본입니다.
 이 도구는 영상에서 자막을 자동으로 만들어 줍니다.
 대본을 넣으면 나레이션 음성도 함께 만들어집니다.
 자막과 음성의 타이밍은 자동으로 맞춰집니다.
@@ -49,6 +50,76 @@ def make_video() -> bool:
     return True
 
 
+NARR_DIR = SAMPLE_DIR / "narration"
+
+# 샘플 나레이션에 쓸 목소리 (한국어 전용 3종)
+SAMPLE_VOICES = [
+    ("ko-KR-SunHiNeural", "선희_여성"),
+    ("ko-KR-InJoonNeural", "인준_남성"),
+    ("ko-KR-HyunsuMultilingualNeural", "현수_남성"),
+]
+
+
+def make_narration() -> int:
+    """샘플 대본을 문장별 mp3로 만든다.
+
+    나레이션 기능을 손으로 확인할 때 매번 인터넷으로 새로 만들지 않아도 되게 하는 용도다.
+    파일 이름에 순번·목소리·문장 앞부분을 넣어 탐색기에서 바로 알아볼 수 있게 한다.
+    """
+    try:
+        import asyncio
+
+        import edge_tts
+    except ImportError:
+        print("  edge-tts가 없어 샘플 나레이션을 건너뜁니다.")
+        return 0
+
+    from app.core.ffprobe import ProbeError, measure_duration
+
+    NARR_DIR.mkdir(parents=True, exist_ok=True)
+    sentences = [s.strip() for s in SCRIPT_TEXT.splitlines() if s.strip()]
+
+    async def synth(text: str, voice: str, path: Path) -> None:
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(str(path))
+
+    made = 0
+    # 문장별 파일 — 기본 목소리(선희)로 전 문장
+    for index, sentence in enumerate(sentences, start=1):
+        head = re.sub(r"[^가-힣A-Za-z0-9]", "", sentence)[:10]
+        path = NARR_DIR / f"나레이션_{index:02d}_선희_{head}.mp3"
+        if path.exists():
+            made += 1
+            continue
+        try:
+            asyncio.run(synth(sentence, SAMPLE_VOICES[0][0], path))
+        except Exception as exc:  # 인터넷이 없거나 경로가 막힌 경우
+            print(f"  [건너뜀] 문장 {index} — {type(exc).__name__} (인터넷 연결을 확인하세요)")
+            continue
+        try:
+            seconds = measure_duration(path)
+            print(f"  [완료] {path.name}  ({seconds:.2f}초)")
+        except ProbeError:
+            print(f"  [완료] {path.name}")
+        made += 1
+
+    # 목소리 비교용 — 같은 문장을 세 목소리로
+    compare_text = "안녕하세요. 무비핏 스튜디오 목소리 비교용 문장입니다."
+    for voice_id, nickname in SAMPLE_VOICES:
+        path = NARR_DIR / f"목소리비교_{nickname}.mp3"
+        if path.exists():
+            made += 1
+            continue
+        try:
+            asyncio.run(synth(compare_text, voice_id, path))
+            print(f"  [완료] {path.name}")
+            made += 1
+        except Exception as exc:
+            print(f"  [건너뜀] {nickname} — {type(exc).__name__}")
+
+    return made
+
+
 def main() -> int:
     SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -60,6 +131,10 @@ def main() -> int:
 
     SAMPLE_SCRIPT.write_text(SCRIPT_TEXT, encoding="utf-8")
     print(f"  [완료] {SAMPLE_SCRIPT}  (문장 4개)")
+
+    print("\n샘플 나레이션 음성을 만듭니다 (인터넷 필요)…")
+    count = make_narration()
+    print(f"  나레이션 파일 {count}개 준비됨 → {NARR_DIR}")
 
     return 0 if ok else 1
 

@@ -17,6 +17,10 @@ let undoStack = [];
 let redoStack = [];
 const UNDO_MAX = 50;
 
+let waveformPeaks = null;  // 소리 파형 데이터 (0~1 배열)
+let abLoop = null;         // 구간 반복 {start, end} 또는 {start} (끝을 찍는 중)
+let tapSyncOn = false;     // 두드려 맞추기 모드
+
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -216,15 +220,21 @@ function renderProject() {
   setMode(project.mode, false);
 
   const player = $("#player");
+  const box = $("#video-box");
   if (project.video_path) {
     player.src = `/media/project/${encodeURIComponent(project.id)}/video`;
     player.hidden = false; player.controls = true;
     $("#no-video").hidden = true;
+    box.classList.remove("is-empty");
     $("#file-info").textContent = project.video_path;
+    loadWaveform();
   } else {
     player.removeAttribute("src"); player.hidden = true;
     $("#no-video").hidden = false;
+    // 영상이 없으면 상자에 폭이 없어 글자가 세로로 쓰이므로 상자를 펼친다
+    box.classList.add("is-empty");
     $("#file-info").textContent = "파일 없음 (대본 모드)";
+    waveformPeaks = null;
   }
 
   $("#script-input").value = project.script || "";
@@ -240,7 +250,7 @@ function renderProject() {
 
 function renderAll() {
   renderSegments();
-  renderTimeline();
+  renderTimelineAll();
   applyOverlayStyle();
   updateOverlay($("#player").currentTime || 0);
 }
@@ -374,8 +384,113 @@ function buildSegmentRow(seg, index) {
   });
 
   li.append(no, times, text, meta, actions);
+
+  // 대본 모드에서는 문장마다 목소리·속도·뒤 쉼을 따로 정할 수 있다 (CapCut이 못 하는 부분)
+  if (project.mode === "script") li.appendChild(buildTtsControls(seg));
+
   updateRowMeta(li, seg);
   return li;
+}
+
+/** 문장 하나의 나레이션 개별 설정 줄. */
+function buildTtsControls(seg) {
+  seg.tts = seg.tts || {};
+  const wrap = document.createElement("div");
+  wrap.className = "seg-tts";
+
+  const label = (text) => {
+    const s = document.createElement("span");
+    s.className = "tt-label"; s.textContent = text;
+    return s;
+  };
+
+  // 목소리 — 비워 두면 전체 설정을 따른다
+  const voice = document.createElement("select");
+  voice.className = "tt-voice";
+  voice.title = "이 문장만 다른 목소리로 읽게 합니다. 대화체 콘텐츠에 유용합니다.";
+  const auto = document.createElement("option");
+  auto.value = ""; auto.textContent = "전체 설정 따름";
+  voice.appendChild(auto);
+  for (const v of voices.filter((x) => x.speaks_korean)) {
+    const opt = document.createElement("option");
+    opt.value = v.id; opt.textContent = v.label;
+    voice.appendChild(opt);
+  }
+  voice.value = seg.tts.voice || "";
+  voice.addEventListener("change", () => {
+    seg.tts.voice = voice.value || undefined;
+    markDirty();
+  });
+
+  // 속도 — 전체 속도에 더해지는 값
+  const rate = document.createElement("input");
+  rate.type = "number"; rate.className = "tt-num";
+  rate.min = "-50"; rate.max = "50"; rate.step = "5";
+  rate.value = parseInt(String(seg.tts.rate || "+0%"), 10) || 0;
+  rate.title = "이 문장만 더 느리게(-) 또는 빠르게(+) 읽습니다. 단위는 %";
+  rate.addEventListener("change", () => {
+    const v = clamp(parseInt(rate.value, 10) || 0, -50, 50);
+    rate.value = v;
+    seg.tts.rate = `${v >= 0 ? "+" : ""}${v}%`;
+    markDirty();
+  });
+
+  // 뒤 쉼 — 이 문장이 끝난 뒤 얼마나 쉴지
+  const gap = document.createElement("input");
+  gap.type = "number"; gap.className = "tt-num";
+  gap.min = "0"; gap.max = "5"; gap.step = "0.1";
+  gap.placeholder = String(project.narration?.gap ?? 0.3);
+  gap.value = seg.tts.gap ?? "";
+  gap.title = "이 문장 뒤에만 따로 쉬는 시간(초). 비워 두면 전체 설정을 따릅니다.";
+  gap.addEventListener("change", () => {
+    const v = gap.value === "" ? undefined : clamp(parseFloat(gap.value) || 0, 0, 5);
+    seg.tts.gap = v;
+    markDirty();
+  });
+
+  // 이 문장만 듣기
+  const play = document.createElement("button");
+  play.className = "btn tt-play"; play.textContent = "🔊 듣기";
+  play.title = "이 문장을 지금 설정한 목소리·속도로 들어 봅니다";
+  play.addEventListener("click", async () => {
+    const text = (seg.text || "").trim();
+    if (!text) { toast("읽을 내용이 없습니다.", { error: true }); return; }
+    await previewSentence(seg, play);
+  });
+
+  wrap.append(label("목소리"), voice, label("속도"), rate, label("뒤 쉼"), gap, play);
+  return wrap;
+}
+
+async function previewSentence(seg, button) {
+  const original = button.textContent;
+  button.textContent = "만드는 중…"; button.disabled = true;
+  try {
+    const res = await fetch("/api/tts/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        voice: seg.tts?.voice || project.narration.voice,
+        text: seg.text.slice(0, 200),
+        rate: seg.tts?.rate || project.narration.global_rate || "+0%",
+        pitch: project.narration.global_pitch || "+0Hz",
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `미리듣기 실패 (${res.status})`);
+    }
+    const measured = res.headers.get("X-Audio-Duration");
+    const blob = await res.blob();
+    if (previewAudio) { previewAudio.pause(); URL.revokeObjectURL(previewAudio.src); }
+    previewAudio = new Audio(URL.createObjectURL(blob));
+    previewAudio.play();
+    if (measured) toast(`이 문장은 ${parseFloat(measured).toFixed(1)}초 걸립니다.`);
+  } catch (err) {
+    toast(err.message, { error: true });
+  } finally {
+    button.textContent = original; button.disabled = false;
+  }
 }
 
 function mkBtn(label, title, onClick) {
@@ -618,6 +733,13 @@ function renderTimeline() {
   }
 }
 
+/** 타임라인을 다시 그린 뒤에는 파형과 구간 반복 표시도 함께 맞춰 준다. */
+function renderTimelineAll() {
+  renderTimeline();
+  drawWaveform();
+  renderABRegion();
+}
+
 function startClipDrag(e, seg, clip) {
   e.preventDefault();
   const mode = e.target.classList.contains("grip-l") ? "left"
@@ -672,7 +794,7 @@ function updatePlayhead(time) {
 
 function setZoom(next) {
   pxPerSec = clamp(next, 3, 300);
-  renderTimeline();
+  renderTimelineAll();
   updatePlayhead($("#player").currentTime || 0);
 }
 
@@ -959,6 +1081,7 @@ function wireStylePanel() {
   });
 
   $("#chk-safe-area").addEventListener("change", (e) => { $("#safe-area").hidden = !e.target.checked; });
+  $("#btn-shorts").addEventListener("click", applyShortsPreset);
 }
 
 // ══ 나레이션 패널 ══════════════════════════════════════════
@@ -1131,6 +1254,7 @@ const HELP_TEXT = {
   selected: "Enter로 글 고치기 · ↑↓로 다른 자막 선택 · Delete로 삭제 · 아래 막대를 끌어 시간 조절",
   edit: "글 중간에 커서를 두고 Ctrl+Enter를 누르면 그 자리에서 두 개로 나뉩니다. Enter로 확정, Esc로 취소.",
   time: "01:23.4 형식으로 입력하세요. 좌우 ◀▶ 버튼은 0.1초씩 움직입니다.",
+  tap: "두드려 맞추기 중 — 문장이 시작될 때마다 스페이스바를 누르세요. 끝내려면 [두드려 맞추기]를 다시 누릅니다.",
 };
 function setHelp(kind) { $("#help-bar").textContent = HELP_TEXT[kind] || HELP_TEXT.idle; }
 
@@ -1245,6 +1369,11 @@ function wireEditor() {
   });
   $("#btn-replace-all").addEventListener("click", replaceAll);
 
+  $("#btn-autosplit").addEventListener("click", autoSplitBySilence);
+  $("#btn-tapsync").addEventListener("click", toggleTapSync);
+  $("#btn-ab").addEventListener("click", toggleAB);
+  $("#chk-wave").addEventListener("change", drawWaveform);
+
   // 타임라인
   $("#tl-zoom-in").addEventListener("click", () => setZoom(pxPerSec * 1.5));
   $("#tl-zoom-out").addEventListener("click", () => setZoom(pxPerSec / 1.5));
@@ -1264,6 +1393,7 @@ function wireEditor() {
     $("#time-now").textContent = fmtTime(player.currentTime);
     updateOverlay(player.currentTime);
     updatePlayhead(player.currentTime);
+    enforceABLoop(player);
   });
   player.addEventListener("loadedmetadata", () => {
     $("#time-total").textContent = fmtTime(player.duration);
@@ -1280,6 +1410,7 @@ function wireEditor() {
   $("#btn-next-seg").addEventListener("click", () => stepSegment(+1));
   window.addEventListener("resize", () => { applyOverlayStyle(); });
 
+  wireSplitters();
   wireOverlayDrag();
   wireStylePanel();
   wireNarrationPanel();
@@ -1321,6 +1452,9 @@ function wireShortcuts() {
 
     if (typing) return;
 
+    // 두드려 맞추기 중에는 스페이스바가 '지금 이 문장 시작' 표시로 쓰인다
+    if (e.key === " " && tapSyncOn) { e.preventDefault(); tapMark(); return; }
+
     if (e.key === " ") { e.preventDefault(); player.paused ? player.play() : player.pause(); }
     else if (e.key === "ArrowLeft") { e.preventDefault(); player.currentTime -= e.shiftKey ? 0.1 : 1; }
     else if (e.key === "ArrowRight") { e.preventDefault(); player.currentTime += e.shiftKey ? 0.1 : 1; }
@@ -1333,6 +1467,282 @@ function wireShortcuts() {
     }
     else if (e.key === "Delete" && selectedId) { e.preventDefault(); deleteSegment(selectedId); }
   });
+}
+
+// ══ 패널 크기 조절 ═════════════════════════════════════════
+const LAYOUT_KEY = "moviefit.layout.v1";
+const LAYOUT_DEFAULT = { left: 250, right: 300, bottom: 310, timeline: 96 };
+
+function applyLayout(layout) {
+  const root = $("#view-editor");
+  root.style.setProperty("--left-w", `${layout.left}px`);
+  root.style.setProperty("--right-w", `${layout.right}px`);
+  root.style.setProperty("--bottom-h", `${layout.bottom}px`);
+  root.style.setProperty("--timeline-h", `${layout.timeline}px`);
+}
+
+function loadLayout() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+    return { ...LAYOUT_DEFAULT, ...saved };
+  } catch (_) { return { ...LAYOUT_DEFAULT }; }
+}
+
+function saveLayout(layout) { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); }
+
+function wireSplitters() {
+  const layout = loadLayout();
+  applyLayout(layout);
+
+  /** 손잡이 하나를 끌 수 있게 만든다.
+   *  axis "x"면 좌우 폭, "y"면 위아래 높이. sign은 끄는 방향과 값이 커지는 방향의 관계. */
+  const makeDraggable = (sel, key, axis, sign, min, max) => {
+    const handle = $(sel);
+    if (!handle) return;
+
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startPos = axis === "x" ? e.clientX : e.clientY;
+      const startValue = loadLayout()[key];
+      handle.classList.add("is-dragging");
+      document.body.classList.add("is-resizing");
+
+      const onMove = (ev) => {
+        const now = axis === "x" ? ev.clientX : ev.clientY;
+        const next = clamp(startValue + (now - startPos) * sign, min, max());
+        const current = loadLayout();
+        current[key] = Math.round(next);
+        applyLayout(current);
+        saveLayout(current);
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        handle.classList.remove("is-dragging");
+        document.body.classList.remove("is-resizing");
+        // 크기가 바뀌면 타임라인과 자막 미리보기를 다시 그려야 한다
+        renderTimeline(); drawWaveform(); applyOverlayStyle();
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+
+    // 두 번 클릭하면 기본값으로 되돌린다
+    handle.addEventListener("dblclick", () => {
+      const current = loadLayout();
+      current[key] = LAYOUT_DEFAULT[key];
+      applyLayout(current); saveLayout(current);
+      renderTimeline(); drawWaveform(); applyOverlayStyle();
+      toast("기본 크기로 되돌렸습니다.");
+    });
+
+    // 키보드로도 조절할 수 있게 (손잡이에 초점을 두고 화살표)
+    handle.addEventListener("keydown", (e) => {
+      const step = e.shiftKey ? 40 : 10;
+      let delta = 0;
+      if (axis === "x" && e.key === "ArrowLeft") delta = -step;
+      else if (axis === "x" && e.key === "ArrowRight") delta = step;
+      else if (axis === "y" && e.key === "ArrowUp") delta = -step;
+      else if (axis === "y" && e.key === "ArrowDown") delta = step;
+      else return;
+      e.preventDefault(); e.stopPropagation();
+      const current = loadLayout();
+      current[key] = Math.round(clamp(current[key] + delta * sign, min, max()));
+      applyLayout(current); saveLayout(current);
+      renderTimeline(); drawWaveform();
+    });
+  };
+
+  makeDraggable("#split-left", "left", "x", +1, 160, () => window.innerWidth * 0.4);
+  makeDraggable("#split-right", "right", "x", -1, 180, () => window.innerWidth * 0.45);
+  makeDraggable("#split-bottom", "bottom", "y", -1, 140, () => window.innerHeight * 0.75);
+  makeDraggable("#split-timeline", "timeline", "y", +1, 60, () => loadLayout().bottom - 120);
+}
+
+// ══ 소리 파형 ══════════════════════════════════════════════
+async function loadWaveform() {
+  if (!project?.video_path) { waveformPeaks = null; return; }
+  try {
+    const data = await api(`/api/audio/waveform/${encodeURIComponent(project.id)}?buckets=2000`);
+    waveformPeaks = data.peaks;
+    drawWaveform();
+  } catch (_) {
+    // 파형은 보조 기능이다. 못 그려도 나머지는 정상 동작해야 한다.
+    waveformPeaks = null;
+    drawWaveform();
+  }
+}
+
+function drawWaveform() {
+  const canvas = $("#tl-wave");
+  if (!canvas) return;
+
+  const show = $("#chk-wave")?.checked;
+  if (!show || !waveformPeaks || !waveformPeaks.length) { canvas.hidden = true; return; }
+  canvas.hidden = false;
+
+  const total = totalDuration();
+  const cssWidth = Math.max(600, total * pxPerSec);
+  const cssHeight = Math.max(20, $("#tl-track").clientHeight || 60);
+
+  // 고해상도 화면에서도 선명하게 그린다
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = cssWidth + "px";
+  canvas.style.height = cssHeight + "px";
+  canvas.width = Math.round(cssWidth * dpr);
+  canvas.height = Math.round(cssHeight * dpr);
+
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.fillStyle = "#5EEAD4";
+
+  const mid = cssHeight / 2;
+  const n = waveformPeaks.length;
+  const step = cssWidth / n;
+  const barWidth = Math.max(1, step * 0.85);
+
+  for (let i = 0; i < n; i++) {
+    const h = Math.max(1, waveformPeaks[i] * (cssHeight * 0.92));
+    ctx.fillRect(i * step, mid - h / 2, barWidth, h);
+  }
+}
+
+// ══ 무음으로 자동 나누기 ═══════════════════════════════════
+async function autoSplitBySilence() {
+  if (!project?.video_path) { toast("영상이 있어야 소리를 분석할 수 있습니다.", { error: true }); return; }
+
+  const btn = $("#btn-autosplit");
+  const original = btn.innerHTML;
+  btn.innerHTML = "분석 중…"; btn.disabled = true;
+  try {
+    const data = await api(`/api/audio/silence/${encodeURIComponent(project.id)}`);
+    const regions = data.regions || [];
+    if (!regions.length) { toast("말소리 구간을 찾지 못했습니다.", { error: true }); return; }
+
+    const keepText = segments().length > 0 &&
+      confirm(`말소리 구간 ${regions.length}개를 찾았습니다.\n\n` +
+              `[확인] 기존 자막 글자를 순서대로 새 구간에 배치합니다.\n` +
+              `[취소] 기존 자막을 지우고 빈 자막 ${regions.length}개를 만듭니다.`);
+
+    snapshot();
+    const oldTexts = segments().map((s) => s.text);
+    project.segments = regions.map((r, i) => ({
+      id: "s" + String(i + 1).padStart(3, "0"),
+      start: Math.round(r.start * 10) / 10,
+      end: Math.round(r.end * 10) / 10,
+      text: keepText ? (oldTexts[i] || "") : "",
+    }));
+    renderAll(); markDirty();
+    toast(`말소리 구간 ${regions.length}개로 자막을 나눴습니다.`);
+  } catch (err) {
+    toast(err.message, { error: true });
+  } finally {
+    btn.innerHTML = original; btn.disabled = false;
+  }
+}
+
+// ══ 두드려 맞추기 (탭 싱크) ════════════════════════════════
+function toggleTapSync() {
+  tapSyncOn = !tapSyncOn;
+  const btn = $("#btn-tapsync");
+  btn.classList.toggle("is-on", tapSyncOn);
+  if (tapSyncOn) {
+    if (!segments().length) {
+      toast("먼저 자막 글을 넣어 두세요. 대본 모드에서 [자막을 대본으로]의 반대로, 대본 문장을 자막으로 만들어 두면 편합니다.", { error: true });
+      tapSyncOn = false; btn.classList.remove("is-on"); return;
+    }
+    selectedId = segments()[0].id;
+    $("#player").play();
+    setHelp("tap");
+    toast("두드려 맞추기 시작 — 문장이 시작될 때마다 스페이스바를 누르세요. 다시 [두드려 맞추기]를 누르면 끝납니다.");
+  } else {
+    $("#player").pause();
+    setHelp("idle");
+    toast("두드려 맞추기를 끝냈습니다.");
+  }
+}
+
+function tapMark() {
+  const player = $("#player");
+  const segs = segments();
+  const i = Math.max(0, segIndex(selectedId));
+  const seg = segs[i];
+  if (!seg) { toggleTapSync(); return; }
+
+  const now = Math.round(player.currentTime * 10) / 10;
+  if (i === 0) snapshot();
+
+  seg.start = now;
+  // 앞 자막의 끝을 이번 시작점까지 늘린다
+  if (i > 0) segs[i - 1].end = now;
+  seg.end = Math.max(now + 0.5, seg.end);
+
+  if (i < segs.length - 1) {
+    selectedId = segs[i + 1].id;
+    renderSegments($("#seg-search").value);
+    renderTimeline();
+    scrollToSegmentRow(selectedId);
+  } else {
+    seg.end = Math.max(now + 1, player.duration || now + 1);
+    renderAll();
+    toggleTapSync();
+  }
+  markDirty();
+}
+
+// ══ A-B 구간 반복 ══════════════════════════════════════════
+function toggleAB() {
+  const player = $("#player");
+  const now = player.currentTime || 0;
+  const btn = $("#btn-ab");
+
+  if (!abLoop) {
+    abLoop = { start: now };
+    btn.textContent = `A ${fmtTime(now)} → B?`;
+    btn.classList.add("is-on");
+    toast("구간 시작점을 찍었습니다. 끝점에서 한 번 더 누르세요.");
+  } else if (abLoop.end === undefined) {
+    if (now <= abLoop.start + 0.2) { toast("끝점이 시작점보다 뒤여야 합니다.", { error: true }); return; }
+    abLoop.end = now;
+    btn.textContent = "A-B 해제";
+    toast(`${fmtTime(abLoop.start)} ~ ${fmtTime(abLoop.end)} 구간을 반복합니다.`);
+  } else {
+    abLoop = null;
+    btn.textContent = "A-B 반복";
+    btn.classList.remove("is-on");
+    toast("구간 반복을 껐습니다.");
+  }
+  renderABRegion();
+}
+
+function renderABRegion() {
+  const el = $("#tl-ab");
+  if (!abLoop || abLoop.end === undefined) { el.hidden = true; return; }
+  el.hidden = false;
+  el.style.left = abLoop.start * pxPerSec + "px";
+  el.style.width = (abLoop.end - abLoop.start) * pxPerSec + "px";
+}
+
+function enforceABLoop(player) {
+  if (abLoop && abLoop.end !== undefined && player.currentTime >= abLoop.end) {
+    player.currentTime = abLoop.start;
+  }
+}
+
+// ══ 세로 영상(쇼츠) 프리셋 ═════════════════════════════════
+function applyShortsPreset() {
+  snapshot();
+  // 쇼츠는 화면 위아래를 앱 UI가 가리므로 자막을 가운데 아래쪽 안전한 자리에 둔다
+  project.style.position = { mode: "custom", preset: "bottom", x: 50, y: 74 };
+  project.style.size = 52;
+  project.style.max_chars = 13;   // 세로 화면은 한 줄이 짧아야 읽힌다
+  project.style.max_lines = 2;
+  project.style.outline.width = 3.5;
+  syncStyleInputs(); applyOverlayStyle(); markDirty();
+  $("#chk-safe-area").checked = true;
+  $("#safe-area").hidden = false;
+  toast("세로 영상용으로 자막 크기·줄바꿈·위치를 맞췄습니다. 안전 영역 안내선도 켰습니다.");
 }
 
 // ══ PWA ════════════════════════════════════════════════════
