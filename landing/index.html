@@ -19,234 +19,7 @@
 <meta name="twitter:title" content="MovieFit Studio — 무료 자막 자동 생성 · AI 나레이션 도구">
 <meta name="twitter:description" content="자막 자동 생성과 AI 나레이션을 한 화면에서. 무료, 워터마크 없음, 로컬 처리.">
 <meta name="twitter:image" content="icons/icon-512.png">
-<style>
-:root{
-  /* 색은 프로그램 화면(app/static/style.css)의 :root 를 그대로 따른다.
-     사이트에서는 청록을 보고 내려받았는데 프로그램을 켜면 크림이 나오면
-     같은 물건으로 보이지 않는다. */
-  --bg:#0D0C0B;          /* 따뜻한 검정 바탕 */
-  --surface:#131211;     /* 카드 바탕 */
-  --surface-2:#24211E;   /* 한 단계 밝은 상자 */
-  --border:#4A443C;      /* 보통 구분선 */
-  --border-strong:#D8CFBC; /* 바깥 상자 테두리 — 진한 크림 */
-  --text:#EDEAE3;
-  --dim:#9A9287;
-  --accent:#E8E2D5;      /* 강조색 = 크림 한 가지 */
-  --accent-dark:#CFC7B5;
-  --accent-ink:#14120F;  /* 크림 바탕 위에 얹는 글자색 */
-  --radius:3px;          /* 모서리는 거의 각지게 */
-  --maxw:1080px;
-}
-*,*::before,*::after{box-sizing:border-box;}
-html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;}
-body{
-  margin:0;
-  background:var(--bg);
-  color:var(--text);
-  font-family:"Pretendard","Malgun Gothic",system-ui,sans-serif;
-  font-size:17px;
-  line-height:1.75;
-  letter-spacing:-0.01em;
-  overflow-x:hidden;
-  word-break:keep-all;
-}
-img{max-width:100%;height:auto;display:block;}
-a{color:var(--accent);text-decoration:none;}
-a:hover{text-decoration:underline;}
-:focus-visible{
-  outline:3px solid var(--accent);
-  outline-offset:3px;
-  border-radius:3px;
-}
-h1,h2,h3{line-height:1.35;margin:0;letter-spacing:-0.02em;}
-p{margin:0;}
-ul{margin:0;padding:0;list-style:none;}
-code{
-  font-family:"Consolas","D2Coding",ui-monospace,monospace;
-  font-size:0.92em;
-  background:var(--surface-2);
-  border:1px solid var(--border);
-  color:var(--accent);
-  border-radius:3px;
-  padding:2px 7px;
-  overflow-wrap:anywhere;
-  white-space:pre-wrap;
-}
-code.block{
-  display:block;
-  padding:12px 14px;
-  margin-top:10px;
-  line-height:1.6;
-}
-
-.wrap{width:100%;max-width:var(--maxw);margin:0 auto;padding:0 20px;}
-.section{padding:72px 0;border-top:1px solid var(--border);}
-.section:first-of-type{border-top:none;}
-.eyebrow{
-  color:var(--accent);
-  font-size:0.82rem;
-  font-weight:700;
-  letter-spacing:0.12em;
-  text-transform:uppercase;
-  margin-bottom:12px;
-}
-.section h2{font-size:clamp(1.5rem,4.2vw,2.05rem);margin-bottom:12px;}
-.section .lead{color:var(--dim);max-width:62ch;margin-bottom:36px;}
-
-/* ── 헤더 ── */
-.topbar{
-  position:sticky;top:0;z-index:50;
-  background:rgba(13,12,11,0.9);
-  backdrop-filter:blur(10px);
-  border-bottom:1px solid var(--border);
-}
-.topbar .wrap{display:flex;align-items:center;gap:14px;height:60px;}
-.brand{display:flex;align-items:center;gap:10px;color:var(--text);font-weight:700;}
-.brand:hover{text-decoration:none;}
-.brand img{width:28px;height:28px;border-radius:3px;}
-.topbar nav{margin-left:auto;display:flex;gap:8px;align-items:center;}
-.topbar nav a{
-  color:var(--dim);font-size:0.93rem;padding:6px 10px;border-radius:3px;
-}
-.topbar nav a:hover{color:var(--text);background:var(--surface-2);text-decoration:none;}
-.nav-hide{display:none;}
-@media (min-width:640px){.nav-hide{display:inline-block;}}
-
-/* ── 히어로 ── */
-.hero{padding:64px 0 76px;text-align:center;}
-.hero-logo{
-  width:104px;height:104px;margin:0 auto 24px;border-radius:3px;
-  border:1px solid var(--border);background:var(--surface);
-  box-shadow:0 12px 40px rgba(232,226,213,0.10);
-}
-.hero h1{font-size:clamp(2rem,7vw,3.1rem);margin-bottom:8px;}
-.hero h1 .accent{color:var(--accent);}
-.hero .tagline{
-  color:var(--dim);font-size:clamp(1rem,2.6vw,1.18rem);
-  max-width:44ch;margin:0 auto 10px;
-}
-.hero .sub{color:var(--dim);font-size:0.95rem;max-width:52ch;margin:0 auto 30px;}
-.btnrow{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;}
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  padding:13px 26px;border-radius:3px;font-weight:700;font-size:1rem;
-  border:1px solid transparent;cursor:pointer;transition:transform .12s ease,background .12s ease;
-}
-.btn:hover{text-decoration:none;transform:translateY(-1px);}
-.btn-primary{background:var(--accent);color:var(--accent-ink);}
-.btn-primary:hover{background:var(--accent-dark);}
-.btn-secondary{background:var(--surface-2);color:var(--text);border-color:var(--border);}
-.btn-secondary:hover{background:#302C28;}
-.badges{
-  display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:26px;
-}
-.badge{
-  font-size:0.83rem;color:var(--dim);
-  border:1px solid var(--border);background:var(--surface);
-  border-radius:3px;padding:5px 13px;
-}
-.badge b{color:var(--accent);font-weight:700;}
-
-/* ── 카드 그리드 ── */
-.grid{display:grid;gap:18px;}
-.grid-3{grid-template-columns:1fr;}
-@media (min-width:760px){.grid-3{grid-template-columns:repeat(3,1fr);}}
-.grid-2{grid-template-columns:1fr;}
-@media (min-width:760px){.grid-2{grid-template-columns:repeat(2,1fr);}}
-.card{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius);padding:26px 24px;
-}
-.card h3{font-size:1.12rem;margin-bottom:10px;}
-.card p{color:var(--dim);font-size:0.96rem;}
-.card .num{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:34px;height:34px;border-radius:3px;margin-bottom:14px;
-  background:rgba(232,226,213,0.12);color:var(--accent);
-  font-weight:800;font-size:0.95rem;
-}
-
-/* ── 기능 목록 ── */
-.feat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;}
-.feat h3{font-size:1.05rem;margin-bottom:14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
-.feat li{
-  display:flex;gap:10px;align-items:flex-start;
-  color:var(--dim);font-size:0.95rem;padding:5px 0;
-}
-.feat li::before{content:"—";color:var(--accent);flex:none;}
-.tag{
-  font-size:0.72rem;font-weight:700;letter-spacing:0.02em;
-  border-radius:3px;padding:2px 9px;border:1px solid var(--border);
-  color:var(--dim);background:var(--surface-2);
-}
-.tag.now{color:var(--accent);border-color:rgba(232,226,213,0.45);background:rgba(232,226,213,0.10);}
-.note{
-  margin-top:20px;color:var(--dim);font-size:0.9rem;
-  background:var(--surface-2);border:1px solid var(--border);
-  border-left:3px solid var(--accent);
-  border-radius:3px;padding:14px 16px;
-}
-
-/* ── 설치 단계 ── */
-.steps{counter-reset:step;display:grid;gap:16px;}
-.step{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius);padding:22px 24px;
-  position:relative;padding-left:70px;
-}
-.step::before{
-  counter-increment:step;content:counter(step);
-  position:absolute;left:22px;top:22px;
-  width:32px;height:32px;border-radius:3px;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:0.95rem;
-}
-.step h3{font-size:1.05rem;margin-bottom:8px;}
-.step p{color:var(--dim);font-size:0.95rem;}
-.step .warn{color:#D9A94E;font-weight:600;}
-@media (max-width:480px){
-  .step{padding-left:24px;padding-top:66px;}
-}
-
-/* ── FAQ ── */
-.faq{display:grid;gap:12px;}
-details{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius);padding:0 22px;
-}
-details[open]{background:var(--surface-2);}
-summary{
-  cursor:pointer;list-style:none;padding:18px 0;
-  font-weight:700;font-size:1rem;
-  display:flex;align-items:center;justify-content:space-between;gap:14px;
-}
-summary::-webkit-details-marker{display:none;}
-summary::after{
-  content:"+";color:var(--accent);font-size:1.35rem;font-weight:400;flex:none;line-height:1;
-}
-details[open] summary::after{content:"\2212";}
-details .answer{color:var(--dim);font-size:0.96rem;padding:0 0 20px;margin-top:-4px;}
-
-/* ── CTA ── */
-/* 마지막 내려받기 상자만 진한 크림 2px — 프로그램 화면의 '바깥 상자'와 같은 규칙 */
-.cta{
-  text-align:center;background:var(--surface);
-  border:2px solid var(--border-strong);border-radius:var(--radius);padding:48px 24px;
-}
-.cta h2{font-size:clamp(1.4rem,4vw,1.9rem);margin-bottom:10px;}
-.cta p{color:var(--dim);margin-bottom:26px;}
-
-/* ── 푸터 ── */
-footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);font-size:0.9rem;}
-.footlinks{display:flex;flex-wrap:wrap;gap:8px 18px;margin-bottom:16px;align-items:center;}
-.disclaimer{font-size:0.85rem;line-height:1.7;max-width:70ch;}
-.skip{
-  position:absolute;left:-9999px;top:0;
-  background:var(--accent);color:var(--accent-ink);padding:10px 16px;
-  border-radius:0 0 3px 0;font-weight:700;z-index:100;
-}
-.skip:focus{left:0;}
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -261,6 +34,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
     <nav aria-label="주요 메뉴">
       <a class="nav-hide" href="#features">기능</a>
       <a href="#install">설치 방법</a>
+      <a href="/guide">사용설명서</a>
       <a class="nav-hide" href="#faq">FAQ</a>
       <a href="https://github.com/parkjikoon-hub/moviefit-studio">GitHub</a>
     </nav>
@@ -400,7 +174,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
       <p class="note">현재 상태 (2026년 8월 12일): 자막 생성·편집, 나레이션, 스타일, 내보내기까지 모두 동작합니다.
         자동 점검 123개 항목을 통과했고, 각 단계마다 별도의 검증 과정을 거쳐 발견된 문제를 고쳤습니다.
         다만 마우스·키보드로만 쓰는 일부 동작은 자동 점검이 닿지 않아 직접 써 보며 다듬는 중입니다.
-        남은 계획은 내 목소리 나레이션과 사용자 설명서입니다.
+        <a href="/guide">사용설명서</a>는 이 사이트에서 바로 보실 수 있고, 남은 계획은 내 목소리 나레이션입니다.
         최신 진행 상황과 검증 근거는 GitHub 저장소의 <code>docs/ROADMAP.md</code>에 적어 두었습니다.</p>
     </div>
   </section>
@@ -503,6 +277,7 @@ footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);f
   <div class="wrap">
     <div class="footlinks">
       <strong style="color:var(--text);">MovieFit Studio</strong>
+      <a href="/guide">사용설명서</a>
       <a href="https://github.com/parkjikoon-hub/moviefit-studio">GitHub 저장소</a>
       <a href="https://github.com/parkjikoon-hub/moviefit-studio/issues">문의 · 버그 신고</a>
       <span>MIT 라이선스</span>

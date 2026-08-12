@@ -1,0 +1,289 @@
+/* MovieFit Studio 소개 사이트 공용 스타일.
+   index.html 과 guide.html 이 함께 쓴다. 한쪽만 고쳐 색이 어긋나는 일을 막으려고 분리했다.
+   색 값은 프로그램 화면(app/static/style.css)의 :root 를 그대로 따른다. */
+:root{
+  /* 색은 프로그램 화면(app/static/style.css)의 :root 를 그대로 따른다.
+     사이트에서는 청록을 보고 내려받았는데 프로그램을 켜면 크림이 나오면
+     같은 물건으로 보이지 않는다. */
+  --bg:#0D0C0B;          /* 따뜻한 검정 바탕 */
+  --surface:#131211;     /* 카드 바탕 */
+  --surface-2:#24211E;   /* 한 단계 밝은 상자 */
+  --border:#4A443C;      /* 잔선 — 구역을 나누는 가로줄 */
+  --border-box:#8E8578;  /* 상자 테두리 — 잔선보다 한 단계 진하게 */
+  --border-strong:#D8CFBC; /* 바깥 상자 테두리 — 진한 크림 */
+  --text:#EDEAE3;
+  --dim:#9A9287;
+  --accent:#E8E2D5;      /* 강조색 = 크림 한 가지 */
+  --accent-dark:#CFC7B5;
+  --accent-ink:#14120F;  /* 크림 바탕 위에 얹는 글자색 */
+  --radius:3px;          /* 모서리는 거의 각지게 */
+  --maxw:1080px;
+}
+*,*::before,*::after{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:"Pretendard","Malgun Gothic",system-ui,sans-serif;
+  font-size:17px;
+  line-height:1.75;
+  letter-spacing:-0.01em;
+  overflow-x:hidden;
+  word-break:keep-all;
+}
+img{max-width:100%;height:auto;display:block;}
+a{color:var(--accent);text-decoration:none;}
+a:hover{text-decoration:underline;}
+:focus-visible{
+  outline:3px solid var(--accent);
+  outline-offset:3px;
+  border-radius:3px;
+}
+h1,h2,h3{line-height:1.35;margin:0;letter-spacing:-0.02em;}
+p{margin:0;}
+ul{margin:0;padding:0;list-style:none;}
+code{
+  font-family:"Consolas","D2Coding",ui-monospace,monospace;
+  font-size:0.92em;
+  background:var(--surface-2);
+  border:1px solid var(--border-box);
+  color:var(--accent);
+  border-radius:3px;
+  padding:2px 7px;
+  overflow-wrap:anywhere;
+  white-space:pre-wrap;
+}
+code.block{
+  display:block;
+  padding:12px 14px;
+  margin-top:10px;
+  line-height:1.6;
+}
+
+.wrap{width:100%;max-width:var(--maxw);margin:0 auto;padding:0 20px;}
+.section{padding:72px 0;border-top:1px solid var(--border);}
+.section:first-of-type{border-top:none;}
+.eyebrow{
+  color:var(--accent);
+  font-size:0.82rem;
+  font-weight:700;
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  margin-bottom:12px;
+}
+.section h2{font-size:clamp(1.5rem,4.2vw,2.05rem);margin-bottom:12px;}
+/* 최대 너비를 ch(영문 0 한 글자 폭)로 주면 한글에서는 절반 폭에서 줄이 꺾인다.
+   한글 한 글자는 영문 0의 두 배 넓기 때문이다. 문단이 자리 너비를 다 쓰게 둔다. */
+.section .lead{color:var(--dim);margin-bottom:36px;text-align:justify;word-break:normal;}
+
+/* ── 헤더 ── */
+.topbar{
+  position:sticky;top:0;z-index:50;
+  background:rgba(13,12,11,0.9);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.topbar .wrap{display:flex;align-items:center;gap:14px;height:60px;}
+.brand{display:flex;align-items:center;gap:10px;color:var(--text);font-weight:700;}
+.brand:hover{text-decoration:none;}
+.brand img{width:28px;height:28px;border-radius:3px;}
+.topbar nav{margin-left:auto;display:flex;gap:8px;align-items:center;}
+.topbar nav a{
+  color:var(--dim);font-size:0.93rem;padding:6px 10px;border-radius:3px;
+}
+.topbar nav a:hover{color:var(--text);background:var(--surface-2);text-decoration:none;}
+.nav-hide{display:none;}
+@media (min-width:640px){.nav-hide{display:inline-block;}}
+
+/* ── 히어로 ── */
+.hero{padding:64px 0 76px;text-align:center;}
+.hero-logo{
+  width:104px;height:104px;margin:0 auto 24px;border-radius:3px;
+  border:1px solid var(--border);background:var(--surface);
+  box-shadow:0 12px 40px rgba(232,226,213,0.10);
+}
+.hero h1{font-size:clamp(2rem,7vw,3.1rem);margin-bottom:8px;}
+.hero h1 .accent{color:var(--accent);}
+/* 가운데 맞춘 글은 너무 넓으면 눈이 다음 줄을 못 찾는다. 다만 ch 로 주면 한글에서
+   절반으로 줄어드니 픽셀로 직접 정한다 (한 줄에 한글 40자 안팎). */
+.hero .tagline{
+  color:var(--dim);font-size:clamp(1rem,2.6vw,1.18rem);
+  max-width:720px;margin:0 auto 10px;
+}
+.hero .sub{color:var(--dim);font-size:0.95rem;max-width:680px;margin:0 auto 30px;}
+.btnrow{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:13px 26px;border-radius:3px;font-weight:700;font-size:1rem;
+  border:1px solid transparent;cursor:pointer;transition:transform .12s ease,background .12s ease;
+}
+.btn:hover{text-decoration:none;transform:translateY(-1px);}
+.btn-primary{background:var(--accent);color:var(--accent-ink);}
+.btn-primary:hover{background:var(--accent-dark);}
+.btn-secondary{background:var(--surface-2);color:var(--text);border-color:var(--border);}
+.btn-secondary:hover{background:#302C28;}
+.badges{
+  display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:26px;
+}
+.badge{
+  font-size:0.83rem;color:var(--dim);
+  border:1px solid var(--border-box);background:var(--surface);
+  border-radius:3px;padding:5px 13px;
+}
+.badge b{color:var(--accent);font-weight:700;}
+
+/* ── 카드 그리드 ── */
+.grid{display:grid;gap:18px;}
+.grid-3{grid-template-columns:1fr;}
+@media (min-width:760px){.grid-3{grid-template-columns:repeat(3,1fr);}}
+.grid-2{grid-template-columns:1fr;}
+@media (min-width:760px){.grid-2{grid-template-columns:repeat(2,1fr);}}
+.card{
+  background:var(--surface);border:1px solid var(--border-box);
+  border-radius:var(--radius);padding:26px 24px;
+}
+.card h3{font-size:1.12rem;margin-bottom:10px;}
+/* 상자 안 글은 좌우 양쪽 정렬. 한글에서 양쪽 정렬을 하려면 word-break를 normal로
+   되돌려야 한다. keep-all(어절 단위로만 끊기)로 두면 좁은 상자에서 글자 사이가
+   크게 벌어진다. */
+.card p{color:var(--dim);font-size:0.96rem;text-align:justify;word-break:normal;}
+.card .num{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border-radius:3px;margin-bottom:14px;
+  background:rgba(232,226,213,0.12);color:var(--accent);
+  font-weight:800;font-size:0.95rem;
+}
+
+/* ── 기능 목록 ── */
+.feat{background:var(--surface);border:1px solid var(--border-box);border-radius:var(--radius);padding:24px;}
+.feat h3{font-size:1.05rem;margin-bottom:14px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.feat li{
+  display:flex;gap:10px;align-items:flex-start;
+  color:var(--dim);font-size:0.95rem;padding:5px 0;
+  text-align:justify;word-break:normal;
+}
+.feat li::before{content:"—";color:var(--accent);flex:none;}
+.tag{
+  font-size:0.72rem;font-weight:700;letter-spacing:0.02em;
+  border-radius:3px;padding:2px 9px;border:1px solid var(--border-box);
+  color:var(--dim);background:var(--surface-2);
+}
+.tag.now{color:var(--accent);border-color:rgba(232,226,213,0.45);background:rgba(232,226,213,0.10);}
+.note{
+  margin-top:20px;color:var(--dim);font-size:0.9rem;
+  background:var(--surface-2);border:1px solid var(--border-box);
+  border-left:3px solid var(--accent);
+  border-radius:3px;padding:14px 16px;
+  text-align:justify;word-break:normal;
+}
+
+/* ── 설치 단계 ── */
+.steps{counter-reset:step;display:grid;gap:16px;}
+.step{
+  background:var(--surface);border:1px solid var(--border-box);
+  border-radius:var(--radius);padding:22px 24px;
+  position:relative;padding-left:70px;
+}
+.step::before{
+  counter-increment:step;content:counter(step);
+  position:absolute;left:22px;top:22px;
+  width:32px;height:32px;border-radius:3px;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--accent);color:var(--accent-ink);font-weight:800;font-size:0.95rem;
+}
+.step h3{font-size:1.05rem;margin-bottom:8px;}
+.step p{color:var(--dim);font-size:0.95rem;text-align:justify;word-break:normal;}
+.step .warn{color:#D9A94E;font-weight:600;}
+@media (max-width:480px){
+  .step{padding-left:24px;padding-top:66px;}
+}
+
+/* ── FAQ ── */
+.faq{display:grid;gap:12px;}
+details{
+  background:var(--surface);border:1px solid var(--border-box);
+  border-radius:var(--radius);padding:0 22px;
+}
+details[open]{background:var(--surface-2);}
+summary{
+  cursor:pointer;list-style:none;padding:18px 0;
+  font-weight:700;font-size:1rem;
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+}
+summary::-webkit-details-marker{display:none;}
+summary::after{
+  content:"+";color:var(--accent);font-size:1.35rem;font-weight:400;flex:none;line-height:1;
+}
+details[open] summary::after{content:"\2212";}
+details .answer{color:var(--dim);font-size:0.96rem;padding:0 0 20px;margin-top:-4px;text-align:justify;word-break:normal;}
+
+/* ── CTA ── */
+/* 마지막 내려받기 상자만 진한 크림 2px — 프로그램 화면의 '바깥 상자'와 같은 규칙 */
+.cta{
+  text-align:center;background:var(--surface);
+  border:2px solid var(--border-strong);border-radius:var(--radius);padding:48px 24px;
+}
+.cta h2{font-size:clamp(1.4rem,4vw,1.9rem);margin-bottom:10px;}
+.cta p{color:var(--dim);margin-bottom:26px;}
+
+/* ── 푸터 ── */
+footer{border-top:1px solid var(--border);padding:40px 0 56px;color:var(--dim);font-size:0.9rem;}
+.footlinks{display:flex;flex-wrap:wrap;gap:8px 18px;margin-bottom:16px;align-items:center;}
+.disclaimer{font-size:0.85rem;line-height:1.7;text-align:justify;word-break:normal;}
+.skip{
+  position:absolute;left:-9999px;top:0;
+  background:var(--accent);color:var(--accent-ink);padding:10px 16px;
+  border-radius:0 0 3px 0;font-weight:700;z-index:100;
+}
+.skip:focus{left:0;}
+
+/* ── 사용설명서 페이지(guide.html) 전용 ────────────────────────── */
+.guide-head{padding:48px 0 8px;}
+.guide-head h1{font-size:clamp(1.7rem,5vw,2.5rem);margin-bottom:10px;}
+.guide-head .sub{color:var(--dim);}
+.guide{max-width:900px;margin:0 auto;padding:0 20px;}
+.guide h2{
+  font-size:1.45rem;margin:64px 0 14px;padding-bottom:10px;
+  border-bottom:2px solid var(--border-strong);
+}
+.guide h3{font-size:1.1rem;margin:30px 0 8px;color:var(--text);}
+.guide p{color:var(--dim);margin:10px 0;text-align:justify;word-break:normal;}
+.guide ul,.guide ol{margin:10px 0;padding-left:22px;color:var(--dim);}
+.guide ul{list-style:disc;}
+.guide ol{list-style:decimal;}
+.guide li{margin:6px 0;text-align:justify;word-break:normal;}
+.guide strong,.guide b{color:var(--text);}
+.guide table{
+  width:100%;border-collapse:collapse;margin:16px 0;font-size:0.95rem;
+  border:1px solid var(--border-box);
+}
+.guide th,.guide td{
+  border:1px solid var(--border-box);padding:10px 12px;
+  text-align:left;vertical-align:top;color:var(--dim);
+  word-break:normal;
+}
+.guide th{background:var(--surface-2);color:var(--text);font-weight:700;white-space:nowrap;}
+.guide .tip{
+  margin:18px 0;padding:14px 16px;font-size:0.94rem;color:var(--dim);
+  background:var(--surface-2);border:1px solid var(--border-box);
+  border-left:3px solid var(--accent);border-radius:var(--radius);
+  text-align:justify;word-break:normal;
+}
+/* 목차 */
+.toc{
+  background:var(--surface);border:2px solid var(--border-strong);
+  border-radius:var(--radius);padding:22px 26px;margin:32px 0 8px;
+}
+.toc h2{font-size:1.05rem;margin:0 0 12px;border:none;padding:0;}
+.toc ol{columns:2;column-gap:32px;margin:0;padding-left:20px;}
+@media (max-width:640px){.toc ol{columns:1;}}
+.toc a{color:var(--dim);}
+.toc a:hover{color:var(--accent);}
+/* 화면에 보이는 버튼 이름 */
+.ui{
+  color:var(--text);background:var(--surface-2);
+  border:1px solid var(--border-box);border-radius:var(--radius);
+  padding:1px 7px;font-size:0.93em;white-space:nowrap;
+}
+.guide-foot{margin:64px 0 0;padding-top:28px;border-top:1px solid var(--border);}
