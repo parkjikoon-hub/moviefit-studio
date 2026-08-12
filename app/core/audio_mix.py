@@ -41,6 +41,11 @@ from app.core.ffprobe import ProbeError, measure_duration
 # amix·sidechaincompress는 입력들의 샘플레이트·채널 배치가 다르면 아예 동작하지 않거나
 # 엉뚱한 결과를 낸다. edge-tts 결과물은 보통 24kHz 모노, 영상 소리는 48kHz 스테레오라
 # 실제로 자주 어긋난다. 그래서 섞기 직전에 강제로 통일한다.
+#
+# 알아 둘 점(실측): 모노 → 스테레오로 바꿀 때 FFmpeg은 채널마다 1/√2(-3dB)를 곱한다.
+# 두 스피커로 갈라 놓아도 전체 세기가 같게 유지하려는 표준 동작이라, 귀로 듣는 크기는
+# 그대로다. 다만 숫자로 재면 원본 모노보다 3dB 낮게 나온다. 나레이션과 원본 소리 모두
+# 똑같이 적용되므로 둘 사이의 균형(원본 30% 같은 설정)은 정확히 지켜진다.
 _COMMON_FMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
 
 

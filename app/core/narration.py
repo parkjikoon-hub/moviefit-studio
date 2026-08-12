@@ -253,6 +253,71 @@ def generate_narration(
     }
 
 
+def build_full_narration(
+    report: Reporter,
+    *,
+    project_id: str,
+    script: str | None = None,
+    only_segment_id: str | None = None,
+) -> dict[str, Any]:
+    """문장별 음성을 만들고 → 하나로 이어 붙이고 → 자막 시각을 확정한다.
+
+    타이밍을 두 번 계산하지 않는다. 이어 붙인 결과 파일에서 각 문장이 실제로 몇 초에
+    시작하는지를 받아 그대로 자막 시각으로 쓴다. 계산값이 아니라 결과물 기준이므로
+    소리와 자막이 어긋날 여지가 없다.
+    """
+    from app.core import audio_mix
+    from app.core import projects as store
+
+    # 1) 문장별 음성 만들기 (여기서 진행률의 앞 80%를 쓴다)
+    def stage_one(progress: float, message: str | None = None) -> None:
+        report(progress * 0.8, message)
+
+    generate_narration(
+        stage_one, project_id=project_id, script=script, only_segment_id=only_segment_id
+    )
+
+    # 2) 하나로 이어 붙이기
+    report(0.82, "문장들을 하나의 나레이션으로 이어 붙이고 있습니다…")
+    clips = narration_clips(project_id)
+    if not clips:
+        raise NarrationError("만들어진 나레이션 음성이 없습니다.")
+
+    pdir = store.project_dir(project_id)
+    out_path = pdir / "narr" / "나레이션_전체.mp3"
+
+    def stage_two(progress: float, message: str | None = None) -> None:
+        report(0.82 + progress * 0.15, message)
+
+    joined = audio_mix.concat_narration(stage_two, clips=clips, out_path=out_path)
+
+    # 3) 이어 붙인 파일에서 각 문장의 실제 위치를 받아 자막 시각으로 확정한다
+    report(0.98, "자막 시각을 확정하고 있습니다…")
+    data = store.load_project(project_id)
+    by_id = {part_id: part for part_id, part in zip(
+        [c["id"] for c in clips], joined.get("parts", [])
+    )}
+
+    for segment in data.get("segments") or []:
+        part = by_id.get(segment.get("id"))
+        if part:
+            segment["start"] = round(float(part["start"]), 3)
+            segment["end"] = round(float(part["end"]), 3)
+
+    data.setdefault("narration", {})["audio"] = f"narr/{out_path.name}"
+    data["narration"]["audio_duration"] = joined.get("duration")
+    store.save_project(project_id, data)
+
+    report(1.0, "완료되었습니다.")
+    return {
+        "segments": data.get("segments", []),
+        "count": len(data.get("segments", [])),
+        "audio": f"narr/{out_path.name}",
+        "duration": joined.get("duration"),
+        "error_ms": joined.get("error_ms"),
+    }
+
+
 def narration_clips(project_id: str) -> list[dict[str, Any]]:
     """이어 붙이기용 목록 — 만들어진 문장 음성 파일과 각 문장 뒤의 쉼."""
     from app.core import projects as store

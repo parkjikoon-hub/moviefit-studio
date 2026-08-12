@@ -448,6 +448,13 @@ body.is-resizing .splitter { pointer-events: auto; }
   border-radius: 6px; padding: 3px 5px; font-size: 11px; text-align: center;
 }
 .seg-tts .tt-play { padding: 3px 9px; font-size: 11px; margin-left: auto; }
+.seg-tts .tt-regen { padding: 3px 9px; font-size: 11px; border-color: var(--accent); color: var(--accent); }
+
+.narr-status {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+  background: var(--accent-bg); border: 1px solid var(--accent); color: var(--text);
+}
+.narr-status.is-warn { background: #3A2A08; border-color: var(--warn); color: #FDE68A; }
 
 .seg-actions { display: flex; gap: 3px; flex: none; }
 .seg-actions .btn { padding: 4px 8px; font-size: 11px; }

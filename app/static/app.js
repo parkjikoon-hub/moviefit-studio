@@ -458,7 +458,15 @@ function buildTtsControls(seg) {
     await previewSentence(seg, play);
   });
 
+  // 이 문장만 다시 만들기 (F-43) — 음성이 이미 있는 문장에만 보여 준다
+  const regen = document.createElement("button");
+  regen.className = "btn tt-regen";
+  regen.textContent = "↻ 다시 만들기";
+  regen.title = "글이나 설정을 고친 뒤 누르면 이 문장만 다시 만들고, 뒤쪽 자막 시각이 자동으로 밀립니다";
+  regen.addEventListener("click", () => regenerateSentence(seg.id));
+
   wrap.append(label("목소리"), voice, label("속도"), rate, label("뒤 쉼"), gap, play);
+  if (seg.tts.audio) wrap.appendChild(regen);
   return wrap;
 }
 
@@ -1339,11 +1347,8 @@ function wireEditor() {
   $("#mode-script").addEventListener("click", () => setMode("script"));
 
   $("#script-input").addEventListener("input", (e) => { project.script = e.target.value; updateScriptStats(); markDirty(); });
-  $("#btn-split-script").addEventListener("click", () => {
-    const list = splitSentences($("#script-input").value);
-    if (!list.length) { toast("대본이 비어 있습니다.", { error: true }); return; }
-    alert(`문장 ${list.length}개로 나뉩니다:\n\n` + list.map((s, i) => `${i + 1}. ${s}`).join("\n"));
-  });
+  // 문장 나누기는 서버 규칙을 그대로 보여 준다 (화면과 결과가 달라지면 안 된다)
+  $("#btn-split-script").addEventListener("click", previewScriptSplit);
 
   $$(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1357,8 +1362,7 @@ function wireEditor() {
 
   $("#btn-stt").addEventListener("click", runSTT);
   $("#btn-export").addEventListener("click", openExportDialog);
-  // 아직 연결되지 않은 기능은 솔직하게 알린다
-  $("#btn-tts").addEventListener("click", () => toast("나레이션 생성은 Phase 2에서 연결됩니다."));
+  $("#btn-tts").addEventListener("click", runNarration);
   $("#btn-to-script").addEventListener("click", () => {
     if (!segments().length) { toast("옮길 자막이 없습니다.", { error: true }); return; }
     project.script = segments().map((s) => s.text).filter(Boolean).join("\n");
@@ -1520,6 +1524,101 @@ async function runSTT() {
   }
 }
 
+// ══ 나레이션 만들기 (F-40, F-42, F-43) ═════════════════════
+async function runNarration() {
+  const script = $("#script-input").value.trim();
+  if (!script) { toast("대본을 입력해 주세요.", { error: true }); return; }
+
+  if (segments().length && !confirm(
+    `이미 자막 ${segments().length}개가 있습니다.\n나레이션을 새로 만들면 지금 자막을 모두 덮어씁니다.\n\n계속할까요?`)) {
+    return;
+  }
+
+  project.script = script;
+  clearTimeout(saveTimer);
+  await saveNow();
+
+  const result = await runJob("나레이션을 만들고 있습니다", () =>
+    api(`/api/projects/${encodeURIComponent(project.id)}/narration`, {
+      method: "POST",
+      body: JSON.stringify({ script }),
+    })
+  );
+  if (!result) return;
+
+  await reloadProjectFromServer();
+  toast(`문장 ${result.count}개의 나레이션을 만들고 자막 시각을 맞췄습니다. (전체 ${result.duration}초)`);
+  await refreshNarrationStatus();
+}
+
+/** 문장 하나만 다시 만든다 (F-43). 이후 자막 시각은 서버가 자동으로 다시 계산한다. */
+async function regenerateSentence(segmentId) {
+  clearTimeout(saveTimer);
+  await saveNow();
+
+  const result = await runJob("이 문장만 다시 만들고 있습니다", () =>
+    api(`/api/projects/${encodeURIComponent(project.id)}/narration`, {
+      method: "POST",
+      body: JSON.stringify({ segment_id: segmentId }),
+    })
+  );
+  if (!result) return;
+
+  await reloadProjectFromServer();
+  toast("이 문장을 다시 만들었습니다. 뒤쪽 자막 시각도 함께 옮겼습니다.");
+  await refreshNarrationStatus();
+}
+
+/** 서버가 자막을 다시 써 주는 작업 뒤에는 프로젝트를 서버 기준으로 다시 읽는다. */
+async function reloadProjectFromServer() {
+  try {
+    project = await api(`/api/projects/${encodeURIComponent(project.id)}`);
+  } catch (err) {
+    toast(`결과를 불러오지 못했습니다: ${err.message}`, { error: true });
+    return;
+  }
+  undoStack = []; redoStack = [];
+  renderAll();
+  refreshUndoButtons();
+  $("#save-state").textContent = "저장됨";
+}
+
+/** 나레이션이 영상보다 길면 미리 알려 준다 (잘림 사고 예방). */
+async function refreshNarrationStatus() {
+  const box = $("#narr-status");
+  if (!project) return;
+  try {
+    const info = await api(`/api/projects/${encodeURIComponent(project.id)}/narration/status`);
+    if (info.warning) {
+      box.textContent = `⚠ ${info.warning}`;
+      box.className = "narr-status is-warn";
+      box.hidden = false;
+    } else if (info.ready) {
+      box.textContent = `나레이션 ${info.narration_seconds}초 · 문장 ${info.voiced}개 준비됨`;
+      box.className = "narr-status";
+      box.hidden = false;
+    } else {
+      box.hidden = true;
+    }
+  } catch (_) { box.hidden = true; }
+}
+
+async function previewScriptSplit() {
+  const script = $("#script-input").value.trim();
+  if (!script) { toast("대본이 비어 있습니다.", { error: true }); return; }
+  try {
+    const data = await api(`/api/projects/${encodeURIComponent(project.id)}/script/split`, {
+      method: "POST",
+      body: JSON.stringify({ script }),
+    });
+    alert(
+      `문장 ${data.count}개로 나뉩니다. 예상 길이 약 ${data.estimated_seconds}초\n` +
+      `(실제 길이는 음성을 만든 뒤 정확히 측정됩니다)\n\n` +
+      data.sentences.map((s, i) => `${i + 1}. ${s}`).join("\n")
+    );
+  } catch (err) { toast(err.message, { error: true }); }
+}
+
 // ══ 내보내기 (F-03, F-50, F-54) ════════════════════════════
 function openExportDialog() {
   if (!project) return;
@@ -1528,13 +1627,21 @@ function openExportDialog() {
 
   const hasSegments = segments().length > 0;
   const hasVideo = !!project.video_path;
+  const hasNarration = !!(project.narration || {}).audio;
+
   for (const btn of $$(".export-opt")) {
     const kind = btn.dataset.kind;
-    const needsVideo = kind === "burn" || kind === "preview";
-    btn.disabled = !hasSegments || (needsVideo && !hasVideo);
-    btn.title = btn.disabled
-      ? (!hasSegments ? "먼저 자막을 만들어 주세요." : "영상이 있어야 만들 수 있습니다.")
-      : "";
+    const needsVideo = kind === "burn" || kind === "preview" || kind === "narr_video";
+    const needsNarration = kind === "narr_audio" || kind === "narr_video";
+    const needsSegments = !needsNarration;
+
+    let reason = "";
+    if (needsSegments && !hasSegments) reason = "먼저 자막을 만들어 주세요.";
+    else if (needsNarration && !hasNarration) reason = "먼저 [대본 모드]에서 나레이션을 만들어 주세요.";
+    else if (needsVideo && !hasVideo) reason = "영상이 있어야 만들 수 있습니다.";
+
+    btn.disabled = !!reason;
+    btn.title = reason;
   }
   dialog.hidden = false;
 }
@@ -1545,16 +1652,24 @@ async function doExport(kind) {
     vtt: "자막 파일(VTT)을 만들고 있습니다",
     preview: "10초 미리보기를 만들고 있습니다",
     burn: "자막을 새긴 영상을 만들고 있습니다",
+    narr_audio: "나레이션 오디오를 만들고 있습니다",
+    narr_video: "나레이션을 영상에 입히고 있습니다",
   };
 
   clearTimeout(saveTimer);
   await saveNow();  // 서버가 최신 자막으로 만들도록 먼저 저장한다
 
+  // 나레이션 관련 두 가지는 다른 주소를 쓴다
+  const isNarration = kind === "narr_audio" || kind === "narr_video";
+  const path = isNarration
+    ? `/api/projects/${encodeURIComponent(project.id)}/narration/export`
+    : `/api/projects/${encodeURIComponent(project.id)}/render`;
+  const body = isNarration
+    ? { kind: kind === "narr_audio" ? "audio" : "video", fmt: "mp3" }
+    : { kind };
+
   const result = await runJob(labels[kind] || "내보내는 중입니다", () =>
-    api(`/api/projects/${encodeURIComponent(project.id)}/render`, {
-      method: "POST",
-      body: JSON.stringify({ kind }),
-    })
+    api(path, { method: "POST", body: JSON.stringify(body) })
   );
   if (!result) return;
 
