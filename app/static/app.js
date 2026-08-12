@@ -1343,10 +1343,10 @@ function wireEditor() {
   $("#stt-language").addEventListener("change", (e) => { project.stt.language = e.target.value; markDirty(); });
   $("#stt-model").addEventListener("change", (e) => { project.stt.model = e.target.value; markDirty(); });
 
+  $("#btn-stt").addEventListener("click", runSTT);
+  $("#btn-export").addEventListener("click", openExportDialog);
   // 아직 연결되지 않은 기능은 솔직하게 알린다
-  $("#btn-stt").addEventListener("click", () => toast("자막 자동 생성은 Phase 1에서 연결됩니다."));
   $("#btn-tts").addEventListener("click", () => toast("나레이션 생성은 Phase 2에서 연결됩니다."));
-  $("#btn-export").addEventListener("click", () => toast("내보내기는 Phase 1에서 연결됩니다."));
   $("#btn-to-script").addEventListener("click", () => {
     if (!segments().length) { toast("옮길 자막이 없습니다.", { error: true }); return; }
     project.script = segments().map((s) => s.text).filter(Boolean).join("\n");
@@ -1412,6 +1412,7 @@ function wireEditor() {
 
   wireSplitters();
   wireProgressBox();
+  wireExportDialog();
   wireOverlayDrag();
   wireStylePanel();
   wireNarrationPanel();
@@ -1467,6 +1468,104 @@ function wireShortcuts() {
       if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     }
     else if (e.key === "Delete" && selectedId) { e.preventDefault(); deleteSegment(selectedId); }
+  });
+}
+
+// ══ 자막 자동 생성 (F-10) ══════════════════════════════════
+async function runSTT() {
+  if (!project?.video_path) {
+    toast("먼저 영상이나 음성 파일을 불러와 주세요.", { error: true });
+    return;
+  }
+  if (segments().length && !confirm(
+    `이미 자막 ${segments().length}개가 있습니다.\n새로 만들면 지금 자막을 모두 덮어씁니다.\n\n계속할까요?`)) {
+    return;
+  }
+
+  const result = await runJob("자막을 만들고 있습니다", () =>
+    api(`/api/projects/${encodeURIComponent(project.id)}/stt`, {
+      method: "POST",
+      body: JSON.stringify({
+        language: project.stt.language,
+        model: project.stt.model,
+        max_chars: project.style.max_chars,
+        max_lines: project.style.max_lines,
+      }),
+    })
+  );
+  if (!result) return;
+
+  snapshot();
+  project.segments = result.segments || [];
+  renderAll();
+  clearTimeout(saveTimer);
+  await saveNow();
+
+  if (!project.segments.length) {
+    toast("말소리를 찾지 못했습니다. 소리가 너무 작거나 음악만 있는 영상일 수 있습니다.", { error: true });
+  } else {
+    toast(`자막 ${project.segments.length}개를 만들었습니다. 이제 글자를 다듬어 보세요.`);
+  }
+}
+
+// ══ 내보내기 (F-03, F-50, F-54) ════════════════════════════
+function openExportDialog() {
+  if (!project) return;
+  const dialog = $("#export-dialog");
+  $("#export-done").hidden = true;
+
+  const hasSegments = segments().length > 0;
+  const hasVideo = !!project.video_path;
+  for (const btn of $$(".export-opt")) {
+    const kind = btn.dataset.kind;
+    const needsVideo = kind === "burn" || kind === "preview";
+    btn.disabled = !hasSegments || (needsVideo && !hasVideo);
+    btn.title = btn.disabled
+      ? (!hasSegments ? "먼저 자막을 만들어 주세요." : "영상이 있어야 만들 수 있습니다.")
+      : "";
+  }
+  dialog.hidden = false;
+}
+
+async function doExport(kind) {
+  const labels = {
+    srt: "자막 파일(SRT)을 만들고 있습니다",
+    vtt: "자막 파일(VTT)을 만들고 있습니다",
+    preview: "10초 미리보기를 만들고 있습니다",
+    burn: "자막을 새긴 영상을 만들고 있습니다",
+  };
+
+  clearTimeout(saveTimer);
+  await saveNow();  // 서버가 최신 자막으로 만들도록 먼저 저장한다
+
+  const result = await runJob(labels[kind] || "내보내는 중입니다", () =>
+    api(`/api/projects/${encodeURIComponent(project.id)}/render`, {
+      method: "POST",
+      body: JSON.stringify({ kind }),
+    })
+  );
+  if (!result) return;
+
+  $("#export-done-name").textContent = `완성: ${result.name}`;
+  $("#export-done").hidden = false;
+  toast(`내보내기를 마쳤습니다: ${result.name}`);
+}
+
+function wireExportDialog() {
+  $$(".export-opt").forEach((btn) => {
+    btn.addEventListener("click", () => doExport(btn.dataset.kind));
+  });
+  $("#export-close").addEventListener("click", () => { $("#export-dialog").hidden = true; });
+  $("#export-dialog").addEventListener("click", (e) => {
+    if (e.target.id === "export-dialog") $("#export-dialog").hidden = true;
+  });
+  $("#btn-open-folder").addEventListener("click", async () => {
+    try {
+      await api("/api/system/open-folder", {
+        method: "POST",
+        body: JSON.stringify({ project_id: project.id, subdir: "out" }),
+      });
+    } catch (err) { toast(err.message, { error: true }); }
   });
 }
 

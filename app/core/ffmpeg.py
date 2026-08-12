@@ -1,0 +1,476 @@
+"""FFmpeg 명령 조립 — 오디오 추출, ASS 자막 만들기, 자막 번인, 미리보기 렌더.
+
+기준 명령은 docs/TECH_SPEC.md 7절이다. 이 파일 밖에서는 ffmpeg을 직접 부르지 않는다.
+
+이 모듈이 신경 쓰는 세 가지 위험:
+
+- R6 (윈도우 경로): 인자는 항상 리스트로 넘긴다. 셸 문자열을 조립하면 한글·공백 경로가 깨진다.
+  필터에 들어가는 경로는 추가로 _escape_filter_path()를 반드시 거쳐야 한다.
+- R4 (한글 폰트): 번인할 때 fontsdir로 번들 폰트 폴더를 알려 준다. 안 그러면 글자가 네모(□)가 된다.
+- N-05 (출력 안전): 원본 파일에 절대 덮어쓰지 않는다. out/ 폴더에 임시 이름으로 쓰고
+  성공했을 때만 최종 이름으로 바꾼다. 실패·취소하면 반쪽짜리 파일이 남지 않는다.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from app.core import style_map
+from app.core.fonts import fonts_dir_for_ffmpeg
+from app.core.jobs import JobCancelled
+
+# 진행률을 보고하는 함수의 모양: report(0.0~1.0, "한국어 설명")
+Reporter = Callable[[float, str], None]
+
+
+class RenderError(Exception):
+    """렌더링(영상 만들기) 실패. 메시지는 사용자에게 그대로 보여줄 한국어 문장이다."""
+
+
+# ── 공통 도우미 ────────────────────────────────────────────
+def _require(tool: str) -> None:
+    """ffmpeg/ffprobe가 설치돼 있는지 먼저 확인한다."""
+    if shutil.which(tool) is None:
+        raise RenderError(
+            f"{tool}(영상 처리 도구)을 찾을 수 없습니다. "
+            "FFmpeg을 설치해 주세요. PowerShell에서: winget install Gyan.FFmpeg"
+        )
+
+
+def _noop(progress: float, message: str) -> None:
+    """진행률 보고가 필요 없을 때 쓰는 빈 함수."""
+
+
+def _fmt_time(seconds: float) -> str:
+    """12.4 → '12초', 72 → '1분 12초'. 사용자에게 보여줄 시간 표기."""
+    total = max(0, int(round(seconds)))
+    minutes, secs = divmod(total, 60)
+    return f"{minutes}분 {secs}초" if minutes else f"{secs}초"
+
+
+# 필터 인자 안에서 특별한 뜻을 갖는 글자들.
+# ':'는 옵션 구분, ','는 필터 구분, '\'는 이스케이프 문자다.
+_FILTER_SPECIALS = ":'\\,;[]"
+
+
+def _escape_filter_path(path: str | Path) -> str:
+    r"""윈도우 경로를 FFmpeg '필터' 안에 넣을 수 있는 형태로 바꾼다.
+
+    왜 필요한가 (R6):
+        -vf "ass=C:\projects\자막.ass" 는 실패한다. 필터 문법에서 ':'는 옵션 구분자라
+        FFmpeg은 이걸 "ass 필터에 'C'라는 파일과 '\projects\자막.ass'라는 옵션"으로 읽는다.
+        게다가 '\'는 이스케이프 문자라 경로의 역슬래시도 먹혀 버린다.
+        이때 나오는 오류 메시지가 "Unable to parse option value" 처럼 엉뚱해서
+        경로 문제인 줄 눈치채기가 아주 어렵다. 그래서 여기 한 곳에서만 처리한다.
+
+    바꾸는 방법:
+        1) 역슬래시(\)를 슬래시(/)로 — 윈도우 FFmpeg은 슬래시 경로를 그대로 받아들인다.
+        2) 남은 특수문자(: ' , ; [ ]) 앞에 역슬래시를 붙인다.
+
+        C:\Users\INTEL\한글 폴더\자막.ass  →  C\:/Users/INTEL/한글 폴더/자막.ass
+
+    한글과 공백은 손대지 않는다. 인자를 리스트로 넘기므로 공백은 문제가 되지 않는다.
+    """
+    text = str(path).replace("\\", "/")
+    return "".join("\\" + ch if ch in _FILTER_SPECIALS else ch for ch in text)
+
+
+def video_dimensions(path: str | Path) -> tuple[int, int]:
+    """영상의 실제 가로·세로 픽셀 크기.
+
+    자막 크기와 위치는 해상도에 비례해서 계산되므로 추정하면 안 되고 실측해야 한다.
+    (app/core/ffprobe.py 는 길이만 재기 때문에 크기 측정은 여기에 둔다.)
+    """
+    _require("ffprobe")
+    src = Path(path)
+    if not src.is_file():
+        raise RenderError(f"영상 파일이 없습니다: {src}")
+
+    # 인자는 반드시 리스트로 — 한글·공백 경로에서 셸 문자열 조립은 깨진다 (R6)
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "json",
+        str(src),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=60)
+    if result.returncode != 0:
+        raise RenderError(f"영상 크기를 재지 못했습니다: {(result.stderr or '').strip()[:200]}")
+
+    try:
+        stream = json.loads(result.stdout)["streams"][0]
+        width, height = int(stream["width"]), int(stream["height"])
+    except (KeyError, IndexError, ValueError, json.JSONDecodeError) as exc:
+        raise RenderError("영상에서 화면 크기 정보를 찾지 못했습니다.") from exc
+
+    if width <= 0 or height <= 0:
+        raise RenderError("영상 화면 크기가 올바르지 않습니다.")
+    return width, height
+
+
+# ── 1) 오디오 추출 (TECH_SPEC 7절 1번) ─────────────────────
+def extract_audio(src: str | Path, dst: str | Path) -> Path:
+    """음성인식(STT)에 넣을 16kHz 모노 wav를 뽑아낸다.
+
+    16kHz 모노인 이유: Whisper 계열 음성인식이 그 형식을 쓰기 때문에
+    미리 맞춰 주면 인식기가 다시 변환하지 않아도 된다.
+    """
+    _require("ffmpeg")
+    source = Path(src)
+    if not source.is_file():
+        raise RenderError(f"파일이 없습니다: {source}")
+
+    target = Path(dst)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-i", str(source),
+        "-vn",              # 영상 트랙 버림
+        "-ac", "1",         # 모노
+        "-ar", "16000",     # 16kHz
+        str(target),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=1800)
+    if result.returncode != 0 or not target.is_file():
+        raise RenderError(f"소리를 뽑아내지 못했습니다: {(result.stderr or '').strip()[:300]}")
+    return target
+
+
+# ── 2) ASS 자막 파일 만들기 ────────────────────────────────
+_ASS_FORMAT_FIELDS = (
+    "Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+    "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, "
+    "Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
+)
+
+
+def _ass_time(seconds: float) -> str:
+    """1.2 → '0:00:01.20'. ASS는 1/100초 단위까지 쓴다."""
+    total = max(0.0, float(seconds))
+    hours, rest = divmod(int(total), 3600)
+    minutes, secs = divmod(rest, 60)
+    centis = int(round((total - int(total)) * 100))
+    if centis == 100:  # 반올림이 100이 되면 1초로 올린다
+        centis = 0
+        secs += 1
+        if secs == 60:
+            secs = 0
+            minutes += 1
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centis:02d}"
+
+
+def _ass_text(text: str) -> str:
+    r"""자막 한 줄의 글자를 ASS가 오해하지 않도록 다듬는다.
+
+    - 중괄호 { } : ASS에서는 서식 명령의 시작·끝이라 그냥 두면 그 부분이 사라진다. \{ \} 로 피한다.
+    - 줄바꿈     : ASS는 파일 안에서 실제 줄바꿈을 쓸 수 없고 \N 이라고 적어야 한다.
+    """
+    cleaned = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    cleaned = cleaned.replace("{", r"\{").replace("}", r"\}")
+    return cleaned.replace("\n", r"\N")
+
+
+def build_ass(
+    segments: list[dict[str, Any]],
+    style: dict[str, Any],
+    video_width: int,
+    video_height: int,
+) -> str:
+    """세그먼트 목록 + 스타일 → 완성된 .ass 파일 내용(문자열).
+
+    자막 생김새는 style_map.to_ass_style()이 유일한 출처다. 여기서 따로 꾸미지 않는다.
+    """
+    style_line, pos_tag = style_map.to_ass_style(style, video_width, video_height)
+
+    lines = [
+        "[Script Info]",
+        "; MovieFit Studio 가 자동으로 만든 자막 파일입니다.",
+        "ScriptType: v4.00+",
+        "WrapStyle: 0",
+        "ScaledBorderAndShadow: yes",
+        "YCbCr Matrix: None",
+        f"PlayResX: {video_width}",
+        f"PlayResY: {video_height}",
+        "",
+        "[V4+ Styles]",
+        f"Format: {_ASS_FORMAT_FIELDS}",
+        style_line,
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+
+    prefix = pos_tag or ""  # 자유 배치일 때만 {\pos(x,y)} 가 붙는다
+    for seg in segments:
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            continue  # 빈 자막은 건너뛴다
+        start = float(seg.get("start") or 0.0)
+        end = float(seg.get("end") or 0.0)
+        if end <= start:
+            continue  # 길이가 없는 자막은 화면에 나올 수 없다
+        lines.append(
+            f"Dialogue: 0,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,"
+            f"{prefix}{_ass_text(text)}"
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+def write_ass_file(
+    path: str | Path,
+    segments: list[dict[str, Any]],
+    style: dict[str, Any],
+    video_width: int,
+    video_height: int,
+) -> Path:
+    """ASS 자막 파일을 UTF-8로 기록한다."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        build_ass(segments, style, video_width, video_height), encoding="utf-8"
+    )
+    return target
+
+
+# ── 3) 진행률을 읽으며 FFmpeg 실행 ─────────────────────────
+_PROGRESS_LINE = re.compile(r"^([a-z_]+)=(.*)$")
+
+
+def _run_with_progress(
+    cmd: list[str],
+    total_seconds: float,
+    report: Reporter,
+    verb: str,
+) -> None:
+    r"""FFmpeg을 돌리면서 실제 진척도를 읽어 report()로 넘긴다.
+
+    -progress pipe:1 을 주면 FFmpeg이 표준출력으로 'out_time_us=1234567' 같은 줄을
+    주기적으로 뿜는다. 이걸 전체 길이로 나누면 진짜 진행률이 나온다 (타이머로 흉내내지 않는다).
+
+    취소되면 report()가 JobCancelled를 던지는데, 그때 FFmpeg 프로세스를 확실히 죽인다.
+    안 그러면 화면상으론 취소됐는데 CPU는 계속 돌아간다.
+    """
+    total = max(0.1, float(total_seconds))
+
+    # stderr는 파일로 받는다. 파이프로 받아 놓고 안 읽으면 버퍼가 차서 FFmpeg이 멈춰 버린다.
+    err_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+    try:
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=err_file,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except OSError as exc:
+            raise RenderError(f"영상 처리 도구를 실행하지 못했습니다: {exc}") from exc
+
+        report(0.0, f"{verb} (0초 / {_fmt_time(total)})")
+        use_us = False  # out_time_us 가 있으면 그걸 쓰고, 없으면 out_time_ms 를 쓴다
+
+        try:
+            for raw in proc.stdout:  # type: ignore[union-attr]
+                matched = _PROGRESS_LINE.match(raw.strip())
+                if matched is None:
+                    continue
+                key, value = matched.group(1), matched.group(2).strip()
+
+                if key == "out_time_us":
+                    use_us = True
+                elif key != "out_time_ms" or use_us:
+                    continue
+
+                # 주의: FFmpeg의 out_time_ms 는 이름과 달리 실제로는 마이크로초 값이다.
+                try:
+                    done = int(value) / 1_000_000.0
+                except ValueError:
+                    continue  # 'N/A' 인 경우가 있다
+                if done < 0:
+                    continue
+
+                fraction = min(done / total, 1.0)
+                report(fraction, f"{verb} ({_fmt_time(min(done, total))} / {_fmt_time(total)})")
+
+            returncode = proc.wait(timeout=60)
+        except JobCancelled:
+            proc.kill()
+            proc.wait(timeout=15)
+            raise
+        except BaseException:
+            proc.kill()
+            proc.wait(timeout=15)
+            raise
+        finally:
+            if proc.stdout is not None:
+                proc.stdout.close()
+
+        if returncode != 0:
+            err_file.seek(0)
+            detail = err_file.read().strip().splitlines()
+            tail = " / ".join(detail[-3:])[:300] if detail else f"오류 코드 {returncode}"
+            raise RenderError(f"영상을 만들지 못했습니다: {tail}")
+    finally:
+        err_file.close()
+
+
+# ── 4) 자막 번인 (F-50) / 미리보기 렌더 (F-54) ─────────────
+def _unique_out_path(out_dir: Path, filename: str) -> Path:
+    """out/ 폴더 안에서 겹치지 않는 파일 이름을 고른다. 기존 결과물을 지우지 않는다."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    candidate = out_dir / filename
+    if not candidate.exists():
+        return candidate
+    stem, suffix = candidate.stem, candidate.suffix
+    for n in range(2, 1000):
+        candidate = out_dir / f"{stem}_{n}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise RenderError("결과 파일 이름을 정하지 못했습니다. out 폴더를 정리해 주세요.")
+
+
+def burn_subtitles(
+    report: Reporter | None = None,
+    *,
+    video_path: str | Path,
+    segments: list[dict[str, Any]],
+    style: dict[str, Any],
+    out_dir: str | Path,
+    out_name: str = "자막영상.mp4",
+    seconds: float | None = None,
+    fast: bool = False,
+) -> dict[str, Any]:
+    """영상에 자막을 새겨 넣어 새 mp4를 만든다 (TECH_SPEC 7절 2번, F-50).
+
+    인자:
+        report   : jobs가 넘겨주는 진행률 보고 함수 (없으면 그냥 무시)
+        segments : 자막 목록 [{"start":1.2, "end":3.8, "text":"..."}, ...]
+        style    : 자막 스타일 사전 (style_map 형식)
+        out_dir  : 프로젝트의 out/ 폴더
+        seconds  : 앞부분 몇 초만 만들지 (미리보기용, None이면 전체)
+        fast     : True면 화질을 조금 낮추고 빠르게 (미리보기용)
+
+    돌려주는 값: {"path", "filename", "duration", "elapsed", "width", "height", "ass"}
+    """
+    report = report or _noop
+    _require("ffmpeg")
+
+    source = Path(video_path)
+    if not source.is_file():
+        raise RenderError(f"영상 파일이 없습니다: {source}")
+
+    out_folder = Path(out_dir)
+    final_path = _unique_out_path(out_folder, out_name)
+
+    # N-05: 원본을 절대 건드리지 않는다
+    if final_path.resolve() == source.resolve():
+        raise RenderError("원본 영상에 덮어쓸 수 없습니다. 다른 이름으로 저장해 주세요.")
+
+    report(0.01, "영상 정보를 확인하고 있습니다…")
+
+    from app.core.ffprobe import ProbeError, measure_duration  # 순환 import 방지용 지연 import
+
+    width, height = video_dimensions(source)
+    try:
+        full_duration = measure_duration(source)
+    except ProbeError as exc:
+        raise RenderError(str(exc)) from exc
+
+    target_duration = min(full_duration, float(seconds)) if seconds else full_duration
+
+    report(0.02, "자막 파일을 만들고 있습니다…")
+    ass_path = write_ass_file(
+        out_folder / (final_path.stem + ".ass"), segments, style, width, height
+    )
+
+    # 임시 이름으로 먼저 쓴다 — 실패하거나 취소되면 완성된 척하는 반쪽 파일이 남지 않는다 (N-05)
+    tmp_path = out_folder / f".{final_path.stem}.tmp{final_path.suffix}"
+    tmp_path.unlink(missing_ok=True)
+
+    # 자막 필터를 쓰면 화면을 다시 그려야 하므로 영상 재인코딩이 필수다 (-c:v copy 불가).
+    # 소리는 그대로 두므로 복사해서 시간을 아낀다.
+    subtitle_filter = (
+        f"ass={_escape_filter_path(ass_path)}"
+        f":fontsdir={_escape_filter_path(fonts_dir_for_ffmpeg())}"
+    )
+
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(source)]
+    if seconds:
+        cmd += ["-t", f"{target_duration:.3f}"]
+    cmd += [
+        "-vf", subtitle_filter,
+        "-c:v", "libx264",
+        "-crf", "23" if fast else "20",
+        "-preset", "veryfast" if fast else "medium",
+        "-pix_fmt", "yuv420p",   # 어떤 재생기에서도 열리는 표준 색 형식
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        "-progress", "pipe:1", "-nostats",
+        str(tmp_path),
+    ]
+
+    started = time.monotonic()
+    try:
+        _run_with_progress(cmd, target_duration, report, "영상을 만들고 있습니다")
+        if not tmp_path.is_file() or tmp_path.stat().st_size == 0:
+            raise RenderError("영상이 만들어지지 않았습니다. 원본 파일을 확인해 주세요.")
+        os.replace(tmp_path, final_path)  # 성공했을 때만 최종 이름으로 바꾼다
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+    elapsed = time.monotonic() - started
+    report(1.0, f"완성했습니다: {final_path.name}")
+
+    return {
+        "path": str(final_path),
+        "filename": final_path.name,
+        "duration": round(target_duration, 3),
+        "elapsed": round(elapsed, 2),
+        "width": width,
+        "height": height,
+        "ass": str(ass_path),
+    }
+
+
+def render_preview(
+    report: Reporter | None = None,
+    *,
+    video_path: str | Path,
+    segments: list[dict[str, Any]],
+    style: dict[str, Any],
+    out_dir: str | Path,
+    seconds: float = 10.0,
+    out_name: str = "미리보기.mp4",
+) -> dict[str, Any]:
+    """앞부분 몇 초만 자막을 넣어 빠르게 만들어 본다 (F-54).
+
+    몇 분짜리 영상을 다 만들고 나서야 자막이 마음에 안 든다는 걸 알면 시간이 아깝다.
+    그래서 앞 10초만 낮은 화질·빠른 설정으로 먼저 확인하게 한다.
+    """
+    return burn_subtitles(
+        report,
+        video_path=video_path,
+        segments=segments,
+        style=style,
+        out_dir=out_dir,
+        out_name=out_name,
+        seconds=seconds,
+        fast=True,
+    )
