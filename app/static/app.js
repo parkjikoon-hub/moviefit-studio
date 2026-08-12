@@ -555,7 +555,9 @@ function nudge(id, key, delta) {
   const seg = segments()[segIndex(id)];
   if (!seg) return;
   snapshot();
-  seg[key] = Math.max(0, Math.round((seg[key] + delta) * 10) / 10);
+  // 0.1초 격자에 맞추지 않고 정확히 0.1초만 움직인다.
+  // 음성인식이 만든 1.54초에서 ▶를 누르면 1.64초가 되어야지 1.6초가 되면 안 된다.
+  seg[key] = Math.max(0, Math.round((seg[key] + delta) * 1000) / 1000);
   if (seg.end <= seg.start) {
     if (key === "start") seg.start = Math.max(0, seg.end - 0.1);
     else seg.end = seg.start + 0.1;
@@ -714,7 +716,10 @@ function renderTimeline() {
     clip.className = "tl-clip";
     clip.dataset.id = seg.id;
     if (seg.id === selectedId) clip.classList.add("is-active");
-    if (cps(seg) > 11) clip.classList.add("is-warn");
+    // 목록의 읽기 속도 색과 같은 기준을 쓴다 (노랑 = 빠름, 빨강 = 너무 빠름)
+    const speed = cps(seg);
+    if (speed > 11) clip.classList.add("is-toofast");
+    else if (speed > 8.5) clip.classList.add("is-warn");
     clip.style.left = seg.start * pxPerSec + "px";
     clip.style.width = Math.max(12, (seg.end - seg.start) * pxPerSec) + "px";
     clip.title = `${fmtTime(seg.start)} → ${fmtTime(seg.end)}\n${seg.text || "(빈 자막)"}\n끌어서 옮기고, 양 끝을 끌어 길이를 바꿉니다.`;
@@ -822,20 +827,27 @@ function updateOverlay(time) {
   $$(".seg-item").forEach((el) => el.classList.toggle("is-playing", seg && el.dataset.id === seg.id));
 }
 
-/** 한 줄 최대 글자수에 맞춰 어절 단위로 줄을 나눈다 (F-11). */
+/** 한 줄 최대 글자수에 맞춰 어절 단위로 줄을 나눈다 (F-11).
+ *  서버의 app/core/subtitles.py wrap_text와 같은 규칙이어야 한다 —
+ *  미리보기와 내보낸 결과가 달라지면 안 되기 때문이다. */
 function wrapText(text) {
   const max = project?.style?.max_chars ?? 20;
-  const maxLines = project?.style?.max_lines ?? 2;
-  const words = text.split(/\s+/).filter(Boolean);
   const lines = [];
-  let line = "";
-  for (const w of words) {
-    if (!line) { line = w; }
-    else if ((line + " " + w).length <= max) { line += " " + w; }
-    else { lines.push(line); line = w; }
+  // 사용자가 직접 넣은 줄바꿈을 먼저 지킨다
+  for (const paragraph of String(text).split("\n")) {
+    let line = "";
+    for (const w of paragraph.split(/\s+/).filter(Boolean)) {
+      if (!line) { line = w; }
+      else if ((line + " " + w).length <= max) { line += " " + w; }
+      else { lines.push(line); line = w; }
+    }
+    lines.push(line);
   }
-  if (line) lines.push(line);
-  return lines.slice(0, maxLines).join("\n");
+  while (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  // 줄 수가 넘쳐도 잘라내지 않는다. 글자를 감추면 사용자는 자막이 잘린 줄 모른 채
+  // 내보내게 되고, 내보낸 파일에는 그 글자가 들어 있어 미리보기와 결과가 달라진다.
+  // 너무 긴 자막은 [자막 검사]가 경고로 알려 준다.
+  return lines.join("\n");
 }
 
 function applyOverlayStyle() {

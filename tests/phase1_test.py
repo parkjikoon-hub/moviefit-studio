@@ -145,11 +145,19 @@ def main() -> int:
         if check("SRT 파일 생성", result is not None, error or ""):
             srt_path = Path(result["path"])
             check("파일이 실제로 존재", srt_path.is_file(), srt_path.name)
-            text = srt_path.read_text(encoding="utf-8")
-            check("SRT 형식이 올바름", "-->" in text and text.strip().startswith("1"))
-            check("한글이 깨지지 않음", "안녕하세요" in text)
+            # 바이트로 읽는다. read_text()는 CRLF를 LF로 바꿔 버려서
+            # 줄바꿈 문자를 있는 그대로 확인할 수 없다.
+            raw = srt_path.read_bytes().decode("utf-8")
+            check("SRT 형식이 올바름", "-->" in raw and raw.strip().startswith("1"))
+            check("한글이 깨지지 않음", "안녕하세요" in raw)
+            check("SRT 표준 줄바꿈(CRLF)", "\r\n" in raw)
+            # 아래 두 가지는 실제로 있었던 결함이다. 다시 생기지 않게 고정 검사로 둔다.
+            check("중괄호 안 글자가 지워지지 않음 (과거 결함)", "{테스트}" in raw)
+            check("직접 넣은 줄바꿈이 유지됨 (과거 결함)",
+                  "두 줄로 나뉜 자막\r\n아랫줄입니다." in raw,
+                  repr(raw[raw.find("두 줄로"): raw.find("두 줄로") + 40]) if "두 줄로" in raw else "문장 없음")
             print("      --- SRT 앞부분 ---")
-            for line in text.splitlines()[:8]:
+            for line in raw.splitlines()[:8]:
                 print(f"      {line}")
 
     # VTT

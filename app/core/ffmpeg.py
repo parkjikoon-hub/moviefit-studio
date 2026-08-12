@@ -239,10 +239,20 @@ def build_ass(
     ]
 
     prefix = pos_tag or ""  # 자유 배치일 때만 {\pos(x,y)} 가 붙는다
+
+    # 줄바꿈은 화면 미리보기·SRT 내보내기와 똑같은 규칙을 쓴다.
+    # 세 곳이 제각각이면 "미리보기에서 두 줄이던 자막이 영상에서는 한 줄"이 되어
+    # 사용자가 결과를 예측할 수 없다.
+    from app.core.subtitles import wrap_text
+
+    max_chars = int(style.get("max_chars") or 20)
+    max_lines = int(style.get("max_lines") or 2)
+
     for seg in segments:
-        text = str(seg.get("text") or "").strip()
-        if not text:
+        raw = str(seg.get("text") or "").strip()
+        if not raw:
             continue  # 빈 자막은 건너뛴다
+        text = "\n".join(wrap_text(raw, max_chars, max_lines))
         start = float(seg.get("start") or 0.0)
         end = float(seg.get("end") or 0.0)
         if end <= start:

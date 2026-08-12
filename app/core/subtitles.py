@@ -99,19 +99,24 @@ def wrap_text(text: str, max_chars: int = 20, max_lines: int = 2) -> list[str]:
     max_lines = max(1, int(max_lines))
 
     lines: list[str] = []
-    current = ""
-    for token in text.split():
-        pieces = [token] if len(token) <= max_chars else _hard_break(token, max_chars)
-        for piece in pieces:
-            if not current:
-                current = piece
-            elif len(current) + 1 + len(piece) <= max_chars:
-                current += " " + piece
-            else:
-                lines.append(current)
-                current = piece
-    if current:
-        lines.append(current)
+    # 사용자가 직접 넣은 줄바꿈은 반드시 지킨다. text.split()만 쓰면 줄바꿈이
+    # 공백처럼 취급되어 조용히 사라진다 (실제로 SRT 내보내기에서 그런 일이 있었다).
+    for paragraph in str(text).split("\n"):
+        current = ""
+        for token in paragraph.split():
+            pieces = [token] if len(token) <= max_chars else _hard_break(token, max_chars)
+            for piece in pieces:
+                if not current:
+                    current = piece
+                elif len(current) + 1 + len(piece) <= max_chars:
+                    current += " " + piece
+                else:
+                    lines.append(current)
+                    current = piece
+        lines.append(current)  # 빈 줄도 사용자가 의도한 줄바꿈이므로 유지한다
+
+    while len(lines) > 1 and lines[-1] == "":
+        lines.pop()
     if not lines:
         return [""]
 
@@ -226,37 +231,63 @@ def apply_corrections(
 
 
 # ── SRT/VTT 내보내기 (F-03) ────────────────────────────────
-def _to_ssafile(
-    segments: list[dict[str, Any]],
-    max_chars: int | None = None,
-    max_lines: int = 2,
-) -> pysubs2.SSAFile:
-    """세그먼트 목록을 pysubs2 자막 객체로 옮긴다.
+def _prepare_lines(
+    seg: dict[str, Any], max_chars: int | None, max_lines: int
+) -> str:
+    """한 자막의 표시용 글자. max_chars를 주면 줄바꿈까지 적용한다."""
+    text = str(seg.get("text", ""))
+    if max_chars:
+        return "\n".join(wrap_text(text, max_chars, max_lines))
+    return text
 
-    max_chars를 주면 저장할 때도 화면과 똑같이 줄바꿈해서 넣는다.
-    """
-    subs = pysubs2.SSAFile()
-    for seg in segments:
-        text = str(seg.get("text", ""))
-        if max_chars:
-            text = "\n".join(wrap_text(text, max_chars, max_lines))
-        event = pysubs2.SSAEvent(
-            start=pysubs2.make_time(s=float(seg.get("start", 0.0))),
-            end=pysubs2.make_time(s=float(seg.get("end", 0.0))),
-        )
-        event.plaintext = text  # 줄바꿈을 자막 형식에 맞게 알아서 바꿔 준다
-        subs.append(event)
-    return subs
+
+def _srt_time(seconds: float) -> str:
+    """1.5 → '00:00:01,500'"""
+    total_ms = max(0, int(round(float(seconds) * 1000)))
+    hours, rest = divmod(total_ms, 3_600_000)
+    minutes, rest = divmod(rest, 60_000)
+    secs, millis = divmod(rest, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _vtt_time(seconds: float) -> str:
+    """VTT는 밀리초 구분자가 쉼표가 아니라 마침표다."""
+    return _srt_time(seconds).replace(",", ".")
 
 
 def to_srt(segments: list[dict[str, Any]], max_chars: int | None = None, max_lines: int = 2) -> str:
-    """SRT 형식 문자열."""
-    return _to_ssafile(segments, max_chars, max_lines).to_string("srt")
+    """SRT 형식 문자열.
+
+    pysubs2를 쓰지 않고 직접 만든다. pysubs2는 내부적으로 ASS 형식을 거치는데,
+    ASS에서 중괄호 {...} 는 '서식 명령'을 뜻하므로 SRT로 내보낼 때 그 안의 글자가
+    통째로 지워진다. 실제로 '중괄호 {테스트} 와' 가 '중괄호  와' 로 저장되는
+    데이터 손실이 있었다. SRT 형식 자체는 단순해서 직접 쓰는 편이 안전하다.
+    (읽어 들이는 쪽은 형식이 제각각이라 pysubs2를 그대로 쓴다.)
+    """
+    blocks: list[str] = []
+    for index, seg in enumerate(segments, start=1):
+        # SRT는 줄바꿈이 CRLF다. 자막 본문 안의 줄바꿈도 맞춰 주지 않으면
+        # 일부 재생기가 두 번째 줄을 무시한다.
+        text = _prepare_lines(seg, max_chars, max_lines).replace("\n", "\r\n")
+        blocks.append(
+            f"{index}\r\n"
+            f"{_srt_time(seg.get('start', 0.0))} --> {_srt_time(seg.get('end', 0.0))}\r\n"
+            f"{text}\r\n"
+        )
+    return "\r\n".join(blocks)
 
 
 def to_vtt(segments: list[dict[str, Any]], max_chars: int | None = None, max_lines: int = 2) -> str:
     """WebVTT 형식 문자열."""
-    return _to_ssafile(segments, max_chars, max_lines).to_string("vtt")
+    blocks = ["WEBVTT\n"]
+    for index, seg in enumerate(segments, start=1):
+        text = _prepare_lines(seg, max_chars, max_lines)
+        blocks.append(
+            f"{index}\n"
+            f"{_vtt_time(seg.get('start', 0.0))} --> {_vtt_time(seg.get('end', 0.0))}\n"
+            f"{text}\n"
+        )
+    return "\n".join(blocks)
 
 
 def save_srt(
@@ -288,7 +319,11 @@ def _save(
 ) -> Path:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    _to_ssafile(segments, max_chars, max_lines).save(str(out), encoding="utf-8", format_=fmt)
+    builder = to_srt if fmt == "srt" else to_vtt
+    # newline="" 로 열어야 파이썬이 줄바꿈을 임의로 바꾸지 않는다
+    # (SRT는 CRLF, VTT는 LF로 우리가 직접 넣은 것을 그대로 써야 한다)
+    with out.open("w", encoding="utf-8", newline="") as fh:
+        fh.write(builder(segments, max_chars, max_lines))
     return out
 
 
@@ -317,11 +352,24 @@ def load_subtitle_file(path: str | Path) -> list[dict[str, Any]]:
     except Exception as exc:
         raise SubtitleImportError(f"자막 파일을 읽지 못했습니다: {src.name} ({exc})") from exc
 
+    # ASS 파일은 {...} 가 진짜 서식 명령이므로 걷어내야 하지만,
+    # SRT/VTT에서는 그냥 사용자가 친 글자다. 형식에 따라 다르게 읽는다.
+    is_ass = src.suffix.lower() in (".ass", ".ssa")
+
     segments: list[dict[str, Any]] = []
     for event in subs:
         if event.is_comment:
             continue
-        text = " ".join(event.plaintext.split())
+
+        if is_ass:
+            text = event.plaintext
+        else:
+            # 원문을 그대로 쓰고 줄바꿈 표시만 실제 줄바꿈으로 되돌린다.
+            # plaintext를 쓰면 '중괄호 {테스트}' 의 가운데 글자가 통째로 사라진다.
+            text = event.text.replace("\\N", "\n").replace("\\n", "\n")
+
+        # 줄 안의 군더더기 공백만 정리하고 줄 구분은 지킨다
+        text = "\n".join(" ".join(line.split()) for line in text.split("\n")).strip()
         if not text:
             continue
         segments.append(

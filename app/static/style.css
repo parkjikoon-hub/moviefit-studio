@@ -363,7 +363,9 @@ body.is-resizing .splitter { pointer-events: auto; }
 }
 .tl-clip:hover { filter: brightness(1.12); }
 .tl-clip.is-active { background: var(--accent); box-shadow: 0 0 0 2px rgba(45,212,191,.35); }
-.tl-clip.is-warn { background: var(--warn); border-color: #FCD34D; }
+/* 읽기 속도 경고 — 목록의 색과 같은 기준을 쓴다 */
+.tl-clip.is-warn { background: var(--warn); border-color: #FCD34D; color: #3B2A00; }
+.tl-clip.is-toofast { background: var(--danger); border-color: #FCA5A5; color: #3B0A0A; }
 .tl-clip .grip {
   position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; background: rgba(0,0,0,.22);
 }
