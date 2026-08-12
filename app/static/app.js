@@ -1411,6 +1411,7 @@ function wireEditor() {
   window.addEventListener("resize", () => { applyOverlayStyle(); });
 
   wireSplitters();
+  wireProgressBox();
   wireOverlayDrag();
   wireStylePanel();
   wireNarrationPanel();
@@ -1466,6 +1467,82 @@ function wireShortcuts() {
       if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
     }
     else if (e.key === "Delete" && selectedId) { e.preventDefault(); deleteSegment(selectedId); }
+  });
+}
+
+// ══ 오래 걸리는 작업 진행률 ════════════════════════════════
+let activeJobId = null;
+let jobTimer = null;
+
+/** 작업을 시작하고 끝날 때까지 진행률을 보여 준다.
+ *  start()는 {job_id} 를 돌려주는 함수여야 한다.
+ *  끝나면 서버가 돌려준 result 를 그대로 반환한다. */
+async function runJob(label, start) {
+  if (activeJobId) { toast("이미 진행 중인 작업이 있습니다. 끝나면 다시 시도해 주세요.", { error: true }); return null; }
+
+  const box = $("#progress-box");
+  $("#pg-label").textContent = label;
+  $("#pg-message").textContent = "준비 중입니다…";
+  $("#pg-percent").textContent = "0%";
+  $("#pg-fill").style.width = "0%";
+  box.hidden = false;
+
+  let started;
+  try {
+    started = await start();
+  } catch (err) {
+    box.hidden = true;
+    toast(err.message, { error: true });
+    return null;
+  }
+  activeJobId = started.job_id;
+
+  return new Promise((resolve) => {
+    jobTimer = setInterval(async () => {
+      let job;
+      try {
+        job = await api(`/api/jobs/${activeJobId}`);
+      } catch (err) {
+        finishJob();
+        toast(`진행 상황을 확인하지 못했습니다: ${err.message}`, { error: true });
+        resolve(null);
+        return;
+      }
+
+      $("#pg-fill").style.width = `${job.percent}%`;
+      $("#pg-percent").textContent = `${job.percent}%`;
+      $("#pg-message").textContent = job.message;
+
+      if (job.status === "done") {
+        finishJob();
+        resolve(job.result);
+      } else if (job.status === "error") {
+        finishJob();
+        toast(job.error || "작업이 실패했습니다.", { error: true });
+        resolve(null);
+      } else if (job.status === "cancelled") {
+        finishJob();
+        toast("작업을 취소했습니다.");
+        resolve(null);
+      }
+    }, 1000);
+  });
+}
+
+function finishJob() {
+  clearInterval(jobTimer);
+  jobTimer = null;
+  activeJobId = null;
+  $("#progress-box").hidden = true;
+}
+
+function wireProgressBox() {
+  $("#pg-cancel").addEventListener("click", async () => {
+    if (!activeJobId) return;
+    try {
+      await api(`/api/jobs/${activeJobId}/cancel`, { method: "POST" });
+      $("#pg-message").textContent = "취소하는 중입니다…";
+    } catch (err) { toast(err.message, { error: true }); }
   });
 }
 
