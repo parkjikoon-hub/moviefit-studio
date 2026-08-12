@@ -1,4 +1,5 @@
-/* MovieFit Studio 화면 스타일 — UI_SPEC 4절(다크 테마, 포인트 청록) */
+/* MovieFit Studio 화면 스타일 — 따뜻한 검정 바탕 + 강조색은 크림 한 가지.
+   (초기 UI_SPEC 4절의 '포인트 청록'은 2026-08-12 개편으로 폐기되었다) */
 
 /* 한글 글꼴 Pretendard.
    폰트 파일을 브라우저에 직접 넘겨야 실제로 적용된다. 이게 없으면 윈도우 기본 글꼴
@@ -156,14 +157,21 @@ button, input, select, textarea {
 .start-head h1 { margin: 14px 0 6px; font-size: 30px; letter-spacing: -0.5px; }
 .start-head .sub { margin: 0; color: var(--text-dim); }
 
+/* 시작 화면의 두 입구(영상 / 대본)는 이 화면의 바깥 상자다.
+   따라서 다른 화면과 같은 규칙 — 진한 크림 2px — 을 그대로 쓴다.
+   개편 전에는 거의 보이지 않는 어두운 점선(--line)이라 상자로 읽히지 않았다. */
 .drop-zone {
-  border: 2px dashed var(--line); border-radius: 4px;
+  border: 2px solid var(--line-outer); border-radius: var(--radius);
   padding: 40px 20px; text-align: center; cursor: pointer;
   background: var(--bg-1); transition: border-color .15s, background .15s;
 }
 .drop-zone:hover, .drop-zone:focus-visible, .drop-zone.is-over {
-  border-color: var(--accent); background: var(--accent-bg); outline: none;
+  border-color: var(--cream); background: var(--accent-bg); outline: none;
 }
+
+/* [대본으로 시작하기] 는 영상 넣기와 나란한 입구이므로 같은 굵기로 맞춘다 */
+#btn-start-script { border-width: 2px; border-color: var(--line-outer); }
+#btn-start-script:hover:not(:disabled) { border-color: var(--cream); }
 .drop-icon { font-size: 34px; color: var(--accent); line-height: 1; }
 .drop-title { margin-top: 10px; font-size: 17px; font-weight: 700; }
 .drop-desc { margin-top: 4px; color: var(--text-dim); font-size: 13px; }
@@ -172,7 +180,7 @@ button, input, select, textarea {
 .path-fallback summary { cursor: pointer; }
 .path-fallback .row { display: flex; gap: 8px; margin-top: 10px; }
 .path-fallback input {
-  flex: 1; background: var(--bg-1); border: 1px solid var(--line);
+  flex: 1; background: var(--bg-1); border: 1px solid var(--line-cream);
   border-radius: var(--radius); padding: 8px 10px;
 }
 
@@ -183,12 +191,13 @@ button, input, select, textarea {
 .recent h2 { font-size: 15px; color: var(--text-dim); font-weight: 600; margin: 0 0 10px; }
 .recent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .recent-list .empty { color: var(--text-dim); font-size: 13px; padding: 8px 0; }
+/* 최근 프로젝트 한 줄은 바깥 상자 안쪽에 놓이는 항목이므로 한 단계 낮춘 크림 1px */
 .recent-item {
   display: flex; align-items: center; gap: 12px;
-  background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-1); border: 1px solid var(--line-cream); border-radius: var(--radius);
   padding: 11px 14px; cursor: pointer;
 }
-.recent-item:hover { border-color: var(--accent); }
+.recent-item:hover { border-color: var(--cream); }
 .recent-item .r-name { font-weight: 600; }
 .recent-item .r-meta { margin-left: auto; color: var(--text-dim); font-size: 12px; text-align: right; }
 .recent-item .r-del { background: transparent; border: 0; color: var(--text-dim); cursor: pointer; padding: 4px 6px; }

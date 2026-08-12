@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -81,6 +82,19 @@ def prune(folder: Path) -> None:
 
 def folder_size_mb(folder: Path) -> float:
     return sum(f.stat().st_size for f in folder.rglob("*") if f.is_file()) / 1024 / 1024
+
+
+def app_version() -> str:
+    """앱이 쓰는 버전을 그대로 읽어 온다.
+
+    여기에 숫자를 따로 적어 두면 app/__init__.py 와 어긋나서, 설치 화면에는 0.2.0인데
+    프로그램 안에서는 0.1.0으로 보이는 일이 생긴다. 출처를 하나로 둔다.
+    """
+    text = (ROOT / "app" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'__version__\s*=\s*"([^"]+)"', text)
+    if not match:
+        raise SystemExit("  [오류] app/__init__.py 에서 __version__ 을 찾지 못했습니다.")
+    return match.group(1)
 
 
 # ── 1. 내려받기 ───────────────────────────────────────────
@@ -368,18 +382,20 @@ def main() -> int:
     parser.add_argument("--payload-only", action="store_true", help="설치 파일 컴파일 전까지만")
     parser.add_argument("--compile-only", action="store_true",
                         help="이미 만든 내용물을 압축만 한다 (내용물 재생성 없음)")
-    parser.add_argument("--version", default="0.1.0")
+    parser.add_argument("--version", default=None,
+                        help="적지 않으면 app/__init__.py 의 버전을 그대로 쓴다")
     args = parser.parse_args()
+    version = args.version or app_version()
 
     print("=" * 60)
-    print("  MovieFit Studio 설치 파일 만들기")
+    print(f"  MovieFit Studio 설치 파일 만들기 — 버전 {version}")
     print("=" * 60)
 
     if args.compile_only:
         if not (PAYLOAD / "MovieFitStudio.bat").exists():
             raise SystemExit("  [오류] 내용물이 없습니다. 먼저 --payload-only 로 만들어 주세요.")
         print(f"\n  기존 내용물을 씁니다: {folder_size_mb(PAYLOAD):.1f} MB")
-        made = compile_installer(args.version)
+        made = compile_installer(version)
         print()
         print("=" * 60)
         print(f"  완성: {made}")
@@ -418,7 +434,7 @@ def main() -> int:
         return 0
 
     step(8, total, "설치 파일로 묶기")
-    made = compile_installer(args.version)
+    made = compile_installer(version)
 
     print()
     print("=" * 60)
