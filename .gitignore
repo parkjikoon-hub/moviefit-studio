@@ -25,6 +25,9 @@ assets/fonts/*.ttf
 # 이게 없으면 내려받은 사람의 화면이 윈도우 기본 글꼴로 나와 글자가 어수선해진다.
 # Pretendard는 OFL 라이선스라 재배포가 허용된다.
 
+# 설치 파일 빌드 결과물 (수백 MB — GitHub Releases로 배포한다)
+build/
+
 # 개발 도구
 .vscode/
 .idea/
