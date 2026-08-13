@@ -86,6 +86,43 @@ def project_video(project_id: str, request: Request, range: str | None = Header(
     return stream_file(Path(video_path), range)
 
 
+@router.get("/project/{project_id}/audio")
+def project_audio(project_id: str, request: Request, range: str | None = Header(default=None)):
+    """음원 영상 프로젝트의 mp3 를 재생용으로 내보낸다.
+
+    화면은 이 소리를 **시계로도 쓴다.** 재생 위치가 흘러야 자막 오버레이·타임라인·
+    두드려 맞추기가 전부 살아난다.
+    """
+    try:
+        data = store.load_project(project_id)
+    except store.ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    audio_path = data.get("audio_path")
+    if not audio_path:
+        raise HTTPException(404, "이 프로젝트에는 등록된 음원이 없습니다.")
+    return stream_file(Path(audio_path), range)
+
+
+@router.get("/project/{project_id}/image/{index}")
+def project_image(project_id: str, index: int, request: Request,
+                  range: str | None = Header(default=None)):
+    """사진 목록의 index 번째 사진을 미리보기용으로 내보낸다 (0부터 센다)."""
+    try:
+        data = store.load_project(project_id)
+    except store.ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    images = data.get("images") or []
+    if index < 0 or index >= len(images):
+        raise HTTPException(404, "그런 번호의 사진이 없습니다.")
+
+    path = Path(images[index].get("path") or "")
+    if not path.is_file():
+        raise HTTPException(404, f"사진 파일을 찾을 수 없습니다: {path.name}")
+    return stream_file(path, range)
+
+
 @router.get("/project/{project_id}/file/{rel_path:path}")
 def project_file(
     project_id: str, rel_path: str, request: Request, range: str | None = Header(default=None)

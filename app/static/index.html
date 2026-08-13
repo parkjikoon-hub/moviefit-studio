@@ -115,6 +115,26 @@
           </div>
         </div>
 
+        <!-- 사진 영상 (Phase 6). 사진이 없는 프로젝트에서는 통째로 감춘다 —
+             영상만 쓰는 사람에게 쓸모없는 칸을 보일 이유가 없다. -->
+        <div id="grp-photos" class="grp" hidden><h3>사진</h3>
+          <div class="grp-body">
+            <div class="row">
+              <button id="btn-add-photos" class="btn btn-small">사진 더 넣기</button>
+              <button id="btn-photo-audio" class="btn btn-small">음원 넣기</button>
+            </div>
+            <label class="field">장당 시간
+              <span class="row">
+                <input id="photo-each-seconds" type="number" min="0.2" step="0.1" value="3">
+                <button id="btn-photo-apply-each" class="btn btn-small">모두 적용</button>
+              </span>
+            </label>
+            <div id="photo-summary" class="hint">사진 0장 · 0초</div>
+            <ul id="photo-list" class="photo-list"></ul>
+            <p class="hint">사진은 목록 순서대로 나옵니다. 화살표로 순서를 바꾸세요.</p>
+          </div>
+        </div>
+
         <div class="grp"><h3>자막 자동 생성</h3>
           <div class="grp-body">
         <label class="field">언어
@@ -178,7 +198,16 @@
           <!-- 여백 채우기일 때 뒤에 깔리는 흐린 배경. 실제 내보내기와 같은 그림이 보이도록
                같은 영상을 소리 없이 함께 재생한다. 화면비를 바꾸지 않으면 아예 감춰진다. -->
           <video id="player-bg" class="player-bg" muted playsinline aria-hidden="true" hidden></video>
+          <!-- 사진 영상에서 여백을 흐린 배경으로 채울 때 뒤에 깔리는 같은 사진.
+               내보낸 영상에는 흐린 배경이 들어가는데 미리보기만 검은 여백이면
+               "미리보기와 결과물이 다르다"가 된다. -->
+          <img id="player-bg-img" class="player-bg" alt="" aria-hidden="true" hidden>
           <video id="player" preload="metadata"></video>
+          <!-- 사진 영상의 그림 층.
+               사진 프로젝트에는 재생할 영상이 없다. 그래서 <video> 는 화면에서 감추고
+               **시계와 소리**만 맡기고(음원이 있으면 mp3, 없으면 길이만 같은 무음),
+               눈에 보이는 그림은 이 <img> 가 시각에 맞춰 갈아 끼운다. -->
+          <img id="player-img" class="player-img" alt="" hidden>
           <div id="no-video" class="no-video">영상이 없는 프로젝트입니다 (대본 모드)</div>
 
           <!-- 자막 오버레이: 마우스로 끌어서 위치를 바꿀 수 있다 -->

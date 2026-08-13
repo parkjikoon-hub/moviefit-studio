@@ -409,6 +409,80 @@ check(
 
 
 # ══════════════════════════════════════════════════════════════
+# 3. 단계 4 — 사진 영상에 자막을 얹는다
+# ══════════════════════════════════════════════════════════════
+print("\n=== 단계 4 · 사진 영상에 자막을 얹는다 ===")
+
+# 프로젝트 이름에 FFmpeg 필터 문법의 구분자를 일부러 넣는다.
+# 이 문자들이 걸러지지 않으면 렌더링이 통째로 실패하는데 오류 메시지로는 원인을
+# 절대 못 찾는다 (memory/ffmpeg-filter-path-escaping.md 회귀 검사).
+TRICKY = "사진, 시험;[a]'b"
+tricky = api(
+    "/api/projects", "POST",
+    {"name": TRICKY, "image_paths": [str(p) for p in sample_images(3)], "mode": "video"},
+)
+made_projects.append(tricky["id"])
+tricky["output"] = {"aspect": "9:16", "fit": "crop", "focus_x": 50.0, "focus_y": 50.0,
+                    "pad_blur": True}
+tricky["segments"] = [{"id": "s1", "start": 0.2, "end": 6.0, "text": "한글 자막 시험"}]
+api(f"/api/projects/{tricky['id']}", "PUT", tricky)
+
+burned = run_job(api(f"/api/projects/{tricky['id']}/render", "POST", {"kind": "burn"})["job_id"])
+burned_path = Path(burned["path"])
+check(
+    f"프로젝트 이름을 「{TRICKY}」 로 지어도 자막 영상이 만들어진다",
+    burned_path.is_file(),
+    burned_path.name,
+)
+check(
+    "사진 프로젝트의 자막 영상도 캔버스 크기(1080×1920)로 나온다",
+    probe_size(burned_path) == (1080, 1920),
+    f"{probe_size(burned_path)}",
+)
+
+
+# ── 한글이 네모(□)로 나오지 않는가 ─────────────────────────────
+#
+# 글꼴을 못 찾으면 libass 는 모든 글자를 **똑같은 네모 하나**로 그린다.
+# 그래서 "글자 픽셀이 있는가"만 보면 통과한다. 대신 **서로 다른 한글 두 벌**을
+# 그려서 그림이 실제로 다른지 본다. 네모라면 두 그림이 거의 같을 것이다.
+def ink_mask(project_id: str, text: str) -> tuple[bytes, Path]:
+    data = api(f"/api/projects/{project_id}")
+    data["segments"] = [dict(data["segments"][0], text=text)]
+    api(f"/api/projects/{project_id}", "PUT", data)
+    out = run_job(
+        api(f"/api/projects/{project_id}/render", "POST",
+            {"kind": "preview", "preview_seconds": 3})["job_id"]
+    )
+    path = Path(out["path"])
+    frame = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", "1.0", "-i", str(path), "-frames:v", "1",
+         "-vf", "scale=270:480", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        capture_output=True, timeout=180,
+    ).stdout
+    return frame, path
+
+
+blank_frame, _ = ink_mask(tricky["id"], "")
+frame_a, _ = ink_mask(tricky["id"], "국물떡볶이")
+frame_b, _ = ink_mask(tricky["id"], "가나다라마")
+
+if min(len(blank_frame), len(frame_a), len(frame_b)) < 270 * 480:
+    check("한글 자막이 네모(□)가 아니다", False, "프레임을 읽지 못했다")
+else:
+    mask_a = [1 if abs(frame_a[i] - blank_frame[i]) > 24 else 0 for i in range(270 * 480)]
+    mask_b = [1 if abs(frame_b[i] - blank_frame[i]) > 24 else 0 for i in range(270 * 480)]
+    ink_a, ink_b = sum(mask_a), sum(mask_b)
+    differ = sum(1 for i in range(270 * 480) if mask_a[i] != mask_b[i])
+    check("자막 글자가 실제로 새겨졌다", ink_a > 200 and ink_b > 200, f"글자 픽셀 {ink_a} / {ink_b}")
+    check(
+        "한글이 네모(□)가 아니다 (서로 다른 글자가 서로 다르게 그려진다)",
+        ink_a > 0 and differ / max(1, min(ink_a, ink_b)) > 0.25,
+        f"두 글자열의 그림이 {differ}픽셀 다르다 (글자 픽셀 {min(ink_a, ink_b)}개 대비)",
+    )
+
+
+# ══════════════════════════════════════════════════════════════
 # 마무리
 # ══════════════════════════════════════════════════════════════
 cleanup()

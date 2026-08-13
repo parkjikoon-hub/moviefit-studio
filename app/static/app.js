@@ -288,6 +288,23 @@ function renderProject() {
     box.classList.remove("is-empty");
     $("#file-info").textContent = project.video_path;
     loadWaveform();
+    refreshPhotoStage();
+  } else if (hasImages() || project.audio_path) {
+    // 사진·음원 프로젝트: <video> 는 감춘 채 시계와 소리만 맡는다.
+    player.hidden = true;
+    $("#no-video").hidden = true;
+    box.classList.remove("is-empty");
+    if (project.audio_path) {
+      player.src = `/media/project/${encodeURIComponent(project.id)}/audio`;
+      $("#file-info").textContent = project.audio_path;
+      loadWaveform();
+    } else {
+      waveformPeaks = null;
+    }
+    if (!project.audio_path) {
+      $("#file-info").textContent = `사진 ${projectImages().length}장`;
+    }
+    refreshPhotoStage({ reloadClock: !project.audio_path });
   } else {
     player.removeAttribute("src"); player.hidden = true;
     $("#no-video").hidden = false;
@@ -295,6 +312,7 @@ function renderProject() {
     box.classList.add("is-empty");
     $("#file-info").textContent = "파일 없음 (대본 모드)";
     waveformPeaks = null;
+    refreshPhotoStage();
   }
 
   $("#script-input").value = project.script || "";
@@ -315,6 +333,320 @@ function renderAll() {
   renderTimelineAll();
   applyOverlayStyle();
   updateOverlay($("#player").currentTime || 0);
+}
+
+// ══ 사진 영상 (Phase 6) ═══════════════════════════════════
+//
+// 사진 프로젝트에는 재생할 영상 파일이 없다. 그런데 이 화면의 거의 모든 것이
+// <video> 의 재생 위치에 매달려 있다 — 자막 오버레이, 타임라인 재생 머리,
+// 두드려 맞추기, A-B 구간 반복. <video> 를 없애면 그것들이 전부 죽는다.
+//
+// 그래서 <video> 를 **시계와 소리 담당**으로 남긴다.
+//   · 음원이 있으면 → mp3 를 넣는다 (브라우저는 <video> 로 소리 파일을 잘 재생한다)
+//   · 소리가 없으면 → 길이만 같은 **무음 소리**를 만들어 넣는다
+// 이렇게 하면 재생·탐색·시각 표시 코드를 한 줄도 고치지 않아도 그대로 살아난다.
+
+const CANVAS_SIZES = { "16:9": [1920, 1080], "9:16": [1080, 1920], "1:1": [1080, 1080] };
+const DEFAULT_CANVAS_ASPECT = "16:9";
+
+let photoTimeline = [];      // [{index, path, start, end}]
+let silentClockUrl = null;   // 무음 소리의 임시 주소 (다 쓰면 반드시 반납한다)
+let shownPhotoIndex = -1;
+
+function projectImages() { return (project && project.images) || []; }
+function hasImages() { return projectImages().length > 0; }
+function hasOwnAudio() { return !!(project && project.audio_path); }
+
+/** 사진들이 들어갈 화면 크기. 서버 slideshow.canvas_of() 와 **같은 규칙**이어야 한다. */
+function projectCanvas() {
+  const conf = currentOutput();
+  let aspect = conf.aspect;
+  if (aspect === "source") {
+    const c = project && project.canvas;
+    if (c && c.width > 0 && c.height > 0) return { width: c.width, height: c.height };
+    aspect = DEFAULT_CANVAS_ASPECT;
+  }
+  const size = CANVAS_SIZES[aspect] || CANVAS_SIZES[DEFAULT_CANVAS_ASPECT];
+  return { width: size[0], height: size[1] };
+}
+
+/** 0.5를 항상 위로 올리는 소수 셋째 자리 반올림 (서버 slideshow._round3 과 같아야 한다). */
+function round3(v) { return Math.floor(v * 1000 + 0.5) / 1000; }
+
+/** 사진마다 "몇 초 동안 보이는가"를 확정한다.
+ *  서버 slideshow.resolve_durations() 를 그대로 옮긴 것이며, 두 계산이 어긋나면
+ *  미리보기와 내보낸 영상의 사진이 달라진다. tests/phase6_test.py 가 둘을 대조한다. */
+function resolveImageDurations() {
+  const images = projectImages();
+  if (!images.length) return [];
+
+  const segs = segments();
+  const starts = {};
+  for (const seg of segs) starts[String(seg.id)] = Number(seg.start) || 0;
+  const anchored = images.some((img) => String(img.seg_id || "") in starts);
+  if (!anchored) return images.map((img) => Object.assign({}, img));
+
+  let lastEnd = 0;
+  for (const seg of segs) lastEnd = Math.max(lastEnd, Number(seg.end) || 0);
+
+  const timed = [];
+  let clock = 0;
+  images.forEach((img, index) => {
+    const item = Object.assign({}, img);
+    const key = String(item.seg_id || "");
+    if (key in starts) clock = starts[key];
+    timed.push({ start: clock, index, item });
+    clock += Math.max(0.05, Number(item.duration) || 0.05);
+  });
+  timed.sort((a, b) => (a.start - b.start) || (a.index - b.index));
+
+  const resolved = timed.map((row, order) => {
+    const nextStart = order + 1 < timed.length
+      ? timed[order + 1].start
+      : Math.max(lastEnd, row.start + Math.max(0.05, Number(row.item.duration) || 0.05));
+    row.item.duration = Math.max(0.05, round3(nextStart - row.start));
+    return row.item;
+  });
+  if (resolved.length && timed[0].start > 0.001) {
+    resolved[0].duration = round3(Number(resolved[0].duration) + timed[0].start);
+  }
+  return resolved;
+}
+
+/** 사진들의 시간표를 다시 만든다. 사진이나 자막이 바뀔 때마다 부른다. */
+function rebuildPhotoTimeline() {
+  const resolved = resolveImageDurations();
+  const byPath = new Map();
+  projectImages().forEach((img, i) => { if (!byPath.has(img.id)) byPath.set(img.id, i); });
+
+  let clock = 0;
+  photoTimeline = resolved.map((img) => {
+    const start = clock;
+    clock += Math.max(0.05, Number(img.duration) || 0.05);
+    return {
+      index: byPath.has(img.id) ? byPath.get(img.id) : 0,
+      path: img.path,
+      start,
+      end: clock,
+    };
+  });
+  return photoTimeline;
+}
+
+function photoTotalSeconds() {
+  return photoTimeline.length ? photoTimeline[photoTimeline.length - 1].end : 0;
+}
+
+/** 그 시각에 보여야 할 사진으로 갈아 끼운다. */
+function updatePhotoFrame(time) {
+  const img = $("#player-img");
+  if (!img || !photoTimeline.length) return;
+  let pick = photoTimeline[photoTimeline.length - 1];
+  for (const row of photoTimeline) {
+    if (time < row.end) { pick = row; break; }
+  }
+  if (pick.index === shownPhotoIndex) return;
+  shownPhotoIndex = pick.index;
+  img.src = `/media/project/${encodeURIComponent(project.id)}/image/${pick.index}`;
+}
+
+/** 소리가 없는 사진 영상의 시계. 길이만 같은 무음 wav 를 만들어 <video> 에 물린다.
+ *
+ *  이렇게 하는 이유: 재생 위치를 읽는 곳이 화면 곳곳에 열두 군데가 넘는다.
+ *  가짜 시계를 따로 만들면 그 열두 곳을 전부 고쳐야 하고, 한 곳만 빠뜨려도
+ *  "재생은 되는데 자막만 안 따라오는" 상태가 된다. */
+function silentClockSrc(seconds) {
+  const rate = 8000;                                   // 브라우저가 받아 주는 가장 낮은 축
+  const frames = Math.max(1, Math.ceil(seconds * rate));
+  const buf = new ArrayBuffer(44 + frames);
+  const view = new DataView(buf);
+  const ascii = (offset, text) => { for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i)); };
+  ascii(0, "RIFF"); view.setUint32(4, 36 + frames, true); ascii(8, "WAVE");
+  ascii(12, "fmt "); view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);      // PCM
+  view.setUint16(22, 1, true);      // 모노
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate, true);   // 초당 바이트
+  view.setUint16(32, 1, true);      // 한 칸 크기
+  view.setUint16(34, 8, true);      // 8비트
+  ascii(36, "data"); view.setUint32(40, frames, true);
+  new Uint8Array(buf, 44).fill(128);                   // 8비트 무음은 128이다 (0이 아니다)
+  if (silentClockUrl) URL.revokeObjectURL(silentClockUrl);
+  silentClockUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  return silentClockUrl;
+}
+
+// ── 사진 목록 화면 ────────────────────────────────────────
+function renderPhotoPanel() {
+  const grp = $("#grp-photos");
+  const list = $("#photo-list");
+  if (!grp || !list) return;
+
+  grp.hidden = !hasImages() && !hasOwnAudio();
+  if (grp.hidden) return;
+
+  const images = projectImages();
+  const resolved = photoTimeline;
+  const total = photoTotalSeconds();
+  $("#photo-summary").textContent =
+    `사진 ${images.length}장 · 전체 ${fmtTime(total)}` +
+    (hasOwnAudio() ? " (길이는 음원에 맞춰집니다)" : "");
+
+  list.innerHTML = "";
+  images.forEach((img, index) => {
+    const row = resolved.find((r) => r.index === index);
+    const li = document.createElement("li");
+    li.className = "photo-item";
+
+    const thumb = document.createElement("img");
+    thumb.className = "photo-thumb";
+    thumb.loading = "lazy";
+    thumb.alt = "";
+    thumb.src = `/media/project/${encodeURIComponent(project.id)}/image/${index}`;
+
+    const name = document.createElement("span");
+    name.className = "photo-name";
+    name.textContent = String(img.path).split(/[\\/]/).pop();
+    name.title = img.path;
+
+    const secs = document.createElement("input");
+    secs.type = "number"; secs.min = "0.2"; secs.step = "0.1";
+    secs.className = "photo-secs";
+    secs.value = String(img.duration ?? 3);
+    secs.disabled = !!img.seg_id;
+    secs.title = img.seg_id ? "가사 줄에 맞춰져 있어 시간이 자동으로 정해집니다" : "이 사진이 보이는 시간(초)";
+    secs.addEventListener("change", () => {
+      snapshot();
+      img.duration = Math.max(0.2, parseFloat(secs.value) || 3);
+      afterPhotosChanged();
+    });
+
+    const when = document.createElement("span");
+    when.className = "photo-when";
+    when.textContent = row ? `${fmtTime(row.start)}~` : "";
+
+    const up = document.createElement("button");
+    up.className = "btn btn-tiny"; up.textContent = "▲"; up.title = "위로";
+    up.disabled = index === 0;
+    up.addEventListener("click", () => movePhoto(index, -1));
+
+    const down = document.createElement("button");
+    down.className = "btn btn-tiny"; down.textContent = "▼"; down.title = "아래로";
+    down.disabled = index === images.length - 1;
+    down.addEventListener("click", () => movePhoto(index, +1));
+
+    const del = document.createElement("button");
+    del.className = "btn btn-tiny"; del.textContent = "✕"; del.title = "이 사진 빼기";
+    del.addEventListener("click", () => {
+      snapshot();
+      projectImages().splice(index, 1);
+      afterPhotosChanged();
+    });
+
+    li.append(thumb, name, when, secs, up, down, del);
+    list.appendChild(li);
+  });
+}
+
+function movePhoto(index, step) {
+  const images = projectImages();
+  const target = index + step;
+  if (target < 0 || target >= images.length) return;
+  snapshot();
+  const [moved] = images.splice(index, 1);
+  images.splice(target, 0, moved);
+  afterPhotosChanged();
+}
+
+/** 사진 목록이 바뀐 뒤에 해야 할 일을 한자리에 모은다.
+ *  하나라도 빠뜨리면 "목록은 바뀌었는데 미리보기는 그대로"가 된다. */
+function afterPhotosChanged() {
+  refreshPhotoStage({ reloadClock: !hasOwnAudio() });
+  renderPhotoPanel();
+  applyFrameGuide();
+  applyOverlayStyle();
+  markDirty();
+}
+
+function wirePhotoPanel() {
+  const add = $("#btn-add-photos");
+  if (add) {
+    add.addEventListener("click", async () => {
+      try {
+        const picked = await api("/api/system/pick-file?kind=images", { method: "POST" });
+        if (picked.cancelled) return;
+        snapshot();
+        if (!project.images) project.images = [];
+        const base = project.images.length;
+        picked.paths.forEach((path, i) => {
+          project.images.push({
+            id: `i${Date.now().toString(36)}${(base + i).toString(36)}`,
+            path, duration: 3.0, seg_id: null,
+          });
+        });
+        if (!project.canvas) project.canvas = projectCanvas();
+        afterPhotosChanged();
+        toast(`사진 ${picked.paths.length}장을 넣었습니다.`);
+      } catch (err) { toast(err.message, { error: true }); }
+    });
+  }
+
+  const audio = $("#btn-photo-audio");
+  if (audio) {
+    audio.addEventListener("click", async () => {
+      try {
+        const picked = await api("/api/system/pick-file?kind=audio", { method: "POST" });
+        if (picked.cancelled) return;
+        snapshot();
+        project.audio_path = picked.path;
+        markDirty();
+        await saveNow();
+        renderProject();
+        toast("음원을 넣었습니다. 재생하면 소리가 나옵니다.");
+      } catch (err) { toast(err.message, { error: true }); }
+    });
+  }
+
+  const applyEach = $("#btn-photo-apply-each");
+  if (applyEach) {
+    applyEach.addEventListener("click", () => {
+      const secs = Math.max(0.2, parseFloat($("#photo-each-seconds").value) || 3);
+      if (!hasImages()) { toast("사진이 없습니다.", { error: true }); return; }
+      snapshot();
+      for (const img of projectImages()) { if (!img.seg_id) img.duration = secs; }
+      afterPhotosChanged();
+      toast(`사진마다 ${secs}초로 맞췄습니다.`);
+    });
+  }
+}
+
+/** 사진 프로젝트의 미리보기를 지금 상태에 맞춘다 (사진 목록·자막·화면비가 바뀔 때). */
+function refreshPhotoStage({ reloadClock = false } = {}) {
+  const img = $("#player-img");
+  const player = $("#player");
+  if (!img || !player) return;
+
+  if (!hasImages()) {
+    img.hidden = true;
+    img.removeAttribute("src");
+    photoTimeline = [];
+    shownPhotoIndex = -1;
+    renderPhotoPanel();
+    return;
+  }
+
+  rebuildPhotoTimeline();
+  img.hidden = false;
+  shownPhotoIndex = -1;
+  updatePhotoFrame(player.currentTime || 0);
+  renderPhotoPanel();
+
+  // 소리가 없으면 사진 길이만큼의 무음을 시계로 쓴다. 사진을 더하거나 시간을 바꾸면
+  // 길이가 달라지므로 다시 만든다.
+  if (!hasOwnAudio() && reloadClock) {
+    player.src = silentClockSrc(photoTotalSeconds());
+    player.load();
+  }
 }
 
 function setMode(mode, dirty = true) {
@@ -1597,6 +1929,7 @@ function wireEditor() {
     $("#time-now").textContent = fmtTime(player.currentTime);
     updateOverlay(player.currentTime);
     updatePlayhead(player.currentTime);
+    updatePhotoFrame(player.currentTime);
     enforceABLoop(player);
     // 여백 채우기의 흐린 배경이 본 영상과 같은 장면을 보이도록 따라가게 한다
     if (currentOutput().fit === "pad" && currentOutput().pad_blur) syncBlurBackground(true);
@@ -1611,6 +1944,22 @@ function wireEditor() {
   player.addEventListener("error", () => {
     if (player.getAttribute("src")) toast("영상을 재생할 수 없습니다. 파일이 옮겨졌거나 지원하지 않는 형식일 수 있습니다.", { error: true });
   });
+
+  // 사진이 바뀌면 그림 크기도 바뀐다. 화면비 틀과 자막 크기는 그 크기를 기준으로
+  // 계산하므로, 사진이 실제로 그려진 뒤에 다시 그려야 자리가 맞는다.
+  const stageImg = $("#player-img");
+  if (stageImg) {
+    stageImg.addEventListener("load", () => {
+      applyFrameGuide();
+      applyOverlayStyle();
+      if (currentOutput().fit === "pad" && currentOutput().pad_blur) syncBlurBackground(true);
+    });
+    stageImg.addEventListener("error", () => {
+      if (stageImg.getAttribute("src")) {
+        toast("사진을 열지 못했습니다. 파일이 옮겨졌거나 지워졌을 수 있습니다.", { error: true });
+      }
+    });
+  }
   $("#btn-play").addEventListener("click", () => (player.paused ? player.play() : player.pause()));
   player.addEventListener("play", () => {
     $("#btn-play").textContent = "⏸";
@@ -1635,6 +1984,7 @@ function wireEditor() {
   wireExportDialog();
   wireOverlayDrag();
   wireStylePanel();
+  wirePhotoPanel();
   wireAspectPanel();
   wireNarrationPanel();
   wireDictionary();
@@ -1898,7 +2248,9 @@ async function openExportDialog() {
   }
 
   const hasSegments = segments().length > 0;
-  const hasVideo = !!project.video_path;
+  // 사진 프로젝트에는 원본 영상이 없지만 **사진이 그림이 되므로** 영상을 만들 수 있다.
+  // 여기서 빼먹으면 사진 프로젝트에서 [자막 입힌 영상]이 회색으로 잠긴다.
+  const hasVideo = !!project.video_path || hasImages();
   const hasNarration = !!(project.narration || {}).audio;
 
   for (const btn of $$(".export-opt")) {
@@ -2394,11 +2746,27 @@ function currentOutput() {
   return normalizeOutput(project && project.output);
 }
 
-/** 지금 열려 있는 영상의 실제 픽셀 크기. 아직 못 읽었으면 null. */
+/** 지금 미리보기에 보이는 그림의 실제 픽셀 크기. 아직 못 읽었으면 null.
+ *
+ *  사진 프로젝트에서 이 함수가 null 을 돌려주면 outputFrameRect() 가 통째로
+ *  무력해져서 **자막을 그리는 자리와 실제로 새겨지는 자리가 어긋난다**
+ *  (memory/preview-must-use-the-output-frame.md 에서 438픽셀까지 벌어졌다).
+ *  그래서 영상이 없으면 지금 보이는 사진의 크기를, 그것도 없으면 캔버스를 쓴다.
+ */
 function sourceDimensions() {
   const p = $("#player");
-  if (!p || !p.videoWidth || !p.videoHeight) return null;
-  return { w: p.videoWidth, h: p.videoHeight };
+  if (p && p.videoWidth && p.videoHeight) return { w: p.videoWidth, h: p.videoHeight };
+
+  const img = $("#player-img");
+  if (img && !img.hidden && img.naturalWidth && img.naturalHeight) {
+    return { w: img.naturalWidth, h: img.naturalHeight };
+  }
+
+  if (project && (hasImages() || project.audio_path)) {
+    const canvas = projectCanvas();
+    return { w: canvas.width, h: canvas.height };
+  }
+  return null;
 }
 
 /** 미리보기 위의 화면비 틀을 지금 설정대로 다시 그린다 (F-C ⓐ). */
@@ -2411,6 +2779,18 @@ function applyFrameGuide() {
 
   const conf = currentOutput();
   const dims = sourceDimensions();
+
+  // 사진 프로젝트에서는 상자를 지금 보이는 사진의 모양으로 만든다 (CSS 설명 참고).
+  // 여백 채우기일 때는 상자가 곧 출력 틀이므로 그쪽 규칙에 양보한다.
+  const stageImg = $("#player-img");
+  const photoMode = hasImages() && stageImg && !stageImg.hidden
+    && stageImg.naturalWidth > 0 && conf.fit !== "pad";
+  box.classList.toggle("is-photo", !!photoMode);
+  if (photoMode) {
+    box.style.setProperty("--img-ar", `${stageImg.naturalWidth} / ${stageImg.naturalHeight}`);
+  } else {
+    box.style.removeProperty("--img-ar");
+  }
 
   // 원본 그대로이거나 영상 크기를 아직 모르면 아무것도 겹치지 않는다
   if (conf.aspect === "source" || !dims) {
@@ -2510,6 +2890,27 @@ function syncBlurBackground(on) {
   const bg = $("#player-bg");
   const p = $("#player");
   if (!bg || !p) return;
+
+  // 사진 프로젝트는 배경도 사진이다. 영상용 배경은 끄고 사진 배경을 쓴다.
+  if (hasImages()) {
+    const bgImg = $("#player-bg-img");
+    const img = $("#player-img");
+    bg.hidden = true;
+    if (bg.src) { bg.removeAttribute("src"); bg.load(); }
+    if (bgImg && img) {
+      if (on && img.getAttribute("src")) {
+        bgImg.src = img.getAttribute("src");
+        bgImg.hidden = false;
+      } else {
+        bgImg.hidden = true;
+        bgImg.removeAttribute("src");
+      }
+    }
+    return;
+  }
+  const bgImg = $("#player-bg-img");
+  if (bgImg) { bgImg.hidden = true; bgImg.removeAttribute("src"); }
+
   if (!on || !p.src) {
     bg.hidden = true;
     if (bg.src) { bg.removeAttribute("src"); bg.load(); }
@@ -2554,6 +2955,9 @@ function setOutput(patch, { snap = true } = {}) {
   if (!project) return;
   if (snap) snapshot();
   project.output = normalizeOutput(Object.assign({}, currentOutput(), patch));
+  // 사진 프로젝트는 **화면비를 고르는 것이 곧 출력 크기를 정하는 것**이다.
+  // 원본이 여럿이라 기준이 없기 때문이다. 그래서 캔버스를 따라 바꿔 준다.
+  if (hasImages()) project.canvas = projectCanvas();
   syncAspectInputs();
   applyFrameGuide();
   applyOverlayStyle();

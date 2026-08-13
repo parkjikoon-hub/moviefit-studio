@@ -540,6 +540,13 @@ body.is-resizing .splitter { pointer-events: auto; }
 .fg-window.is-dragging { cursor: grabbing; border-color: #fff; }
 .fg-window:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
+/* 사진 미리보기 — 상자를 **그 사진의 모양**으로 만들고 사진을 그 안에 꽉 채운다.
+   이렇게 해야 상자가 곧 보이는 그림의 자리가 되어, 그 위에 얹는 자막 오버레이와
+   화면비 틀의 좌표가 맞는다. 그냥 max-height 만 주면 큰 사진이 상자를 밀어내
+   아래의 재생 단추를 덮어 버린다 (백분율 높이는 부모 높이가 정해져 있어야 듣는다). */
+.video-box.is-photo { aspect-ratio: var(--img-ar, 16 / 9); max-width: 100%; max-height: 100%; }
+.video-box.is-photo .player-img { width: 100%; height: 100%; object-fit: contain; }
+
 /* 여백 채우기 미리보기 — 상자를 목표 화면비로 만들고 영상을 그 안에 넣는다 */
 .player-bg {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -573,15 +580,41 @@ body.is-resizing .splitter { pointer-events: auto; }
 .dict-list .d-del:hover { color: var(--danger); }
 
 /* ── 플레이어 ─────────────────────────────────────────── */
-.stage { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+/* min-height: 0 이 없으면 미리보기가 커질 때 이 칸이 아래로 넘쳐서
+   재생 단추 줄이 타임라인 뒤로 숨는다 (격자 칸의 기본 최소 크기는 '내용 크기'다). */
+.stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
 .video-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; padding: 12px; }
-.video-box { position: relative; display: inline-block; max-width: 100%; max-height: 100%; line-height: 0; }
+/* min-width/min-height 0 이 없으면 큰 사진이 들어왔을 때 상자가 줄어들지 못한다.
+   flex 항목의 기본 최소 크기는 '내용 크기'라서, 1920×1080 사진이 들어오면 상자가
+   그만큼 커지고 **아래의 재생 단추 줄이 타임라인 밑으로 밀려나 눌리지 않는다.**
+   <video> 는 기본 크기가 300×150 이라 이 문제가 드러나지 않았다. */
+.video-box {
+  position: relative; display: inline-block;
+  max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; line-height: 0;
+}
 
 /* 영상이 없을 때는 상자 자체에 폭이 없어져서 안내 문구가 한 글자씩 세로로 쓰인다.
    그래서 빈 상태에서는 상자를 화면 크기로 펼치고 문구를 가로로 고정한다. */
 .video-box.is-empty { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
 
 #player { max-width: 100%; max-height: 100%; background: #000; border-radius: 2px; display: block; }
+
+/* 사진 목록 (왼쪽 패널). 한 줄에 미리보기·이름·시각·시간·순서 단추가 들어간다.
+   좁은 패널이므로 이름만 늘어나고 나머지는 제 크기를 지킨다. */
+.photo-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.photo-item {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line-cream); border-radius: var(--radius); padding: 4px 6px;
+}
+.photo-thumb { width: 36px; height: 27px; object-fit: cover; border-radius: 2px; background: #000; flex: none; }
+.photo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.photo-when { font-size: 11px; color: var(--text-dim); flex: none; }
+.photo-secs { width: 50px; flex: none; padding: 3px 4px; }
+.photo-item .btn { padding: 2px 5px; font-size: 11px; }
+
+/* 사진 영상의 그림 층. <video> 와 똑같은 규칙으로 놓여야 화면비 틀과 자막 자리가 맞는다. */
+.player-img { max-width: 100%; max-height: 100%; background: #000; border-radius: 2px; display: block; }
+.video-box.is-padded .player-img { width: 100%; height: 100%; object-fit: contain; }
 
 .no-video {
   position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
@@ -923,6 +956,7 @@ body.is-resizing .splitter { pointer-events: auto; }
 .seg-tts .tt-play, .seg-tts .tt-regen,
 .transport .btn-tiny,
 .path-fallback .btn,
+.photo-item .btn,
 .recent-item .btn { min-width: 0; }
 
 /* 자막 검색 칸은 다른 입력칸보다 또렷하게 — 자주 쓰는 자리다 */

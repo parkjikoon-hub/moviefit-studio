@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import subprocess
 import time
@@ -35,12 +36,11 @@ from app.core import framing, style_map
 from app.core.ffmpeg import (
     RenderError,
     Reporter,
-    _filter_paths,
     _noop,
     _require,
     _run_with_progress,
     _unique_out_path,
-    write_ass_file,
+    burn_subtitles,
 )
 
 CACHE_DIR = "cache"
@@ -48,6 +48,17 @@ CACHE_DIR = "cache"
 # 사진 영상의 프레임률. 사진은 움직이지 않으므로 높일 이유가 없고,
 # 30이면 어떤 재생기에서도 문제가 없다.
 FPS = 30
+
+
+def _round3(value: float) -> float:
+    """0.5를 항상 위로 올리는 소수 셋째 자리 반올림.
+
+    화면(app.js)이 이 계산을 그대로 갖고 있다. 미리보기에 보이는 사진과 내보낸
+    영상의 사진이 어긋나면 안 되므로 규칙을 하나로 못 박는다. 파이썬 기본 round()
+    는 0.5를 짝수 쪽으로 보내고 자바스크립트 Math.round 는 언제나 위로 올린다
+    (framing._round 와 같은 이유).
+    """
+    return math.floor(value * 1000 + 0.5) / 1000
 
 
 def cache_dir(project_dir: Path) -> Path:
@@ -127,12 +138,12 @@ def resolve_durations(data: dict[str, Any]) -> list[dict[str, Any]]:
         else:
             # 마지막 사진은 마지막 자막이 끝날 때까지 (음원이 있으면 -shortest 가 잘라 준다)
             next_start = max(last_end, start + max(0.05, float(item.get("duration") or 0.05)))
-        item["duration"] = max(0.05, round(next_start - start, 3))
+        item["duration"] = max(0.05, _round3(next_start - start))
         resolved.append(item)
 
     # ④ 첫 가사가 0초가 아니면 그 앞이 비어 버린다. 첫 사진을 0초부터 보이게 한다.
     if resolved and timed[0][0] > 0.001:
-        resolved[0]["duration"] = round(float(resolved[0]["duration"]) + timed[0][0], 3)
+        resolved[0]["duration"] = _round3(float(resolved[0]["duration"]) + timed[0][0])
 
     return resolved
 
@@ -325,83 +336,126 @@ def build_slideshow(
     if seconds:
         target_duration = min(target_duration, float(seconds))
 
-    # 자막은 캔버스 크기로 만든다. 원본 사진 크기로 만들면 글자 크기와 자리가 어긋난다.
-    ass_path = None
-    subtitle_filter = None
-    if segments:
-        report(0.21, "자막 파일을 만들고 있습니다…")
-        merged_style = style_map.normalize(style)
-        # 자막 파일도 cache/ 에 둔다 — FFmpeg 을 이 폴더에서 실행하므로 필터에
-        # 파일 이름만 넣게 되어 경로 특수문자 문제가 아예 없어진다.
-        ass_path = write_ass_file(
-            work / "slideshow.ass", segments, merged_style, canvas_w, canvas_h
-        )
-        _, ass_arg, fonts_arg = _filter_paths(ass_path)
-        subtitle_filter = f"ass={ass_arg}:fontsdir={fonts_arg}"
+    started = time.monotonic()
 
-    # 프레임률은 **필터가 아니라 출력 옵션(-r)으로** 정한다.
+    # ── 자막이 없으면 한 번에 끝난다 ───────────────────────────
+    if not segments:
+        tmp_path = out_folder / f".{final_path.stem}.tmp{final_path.suffix}"
+        tmp_path.unlink(missing_ok=True)
+        try:
+            _encode_concat(
+                report, work=work, list_name=list_path.name, audio=audio,
+                target_duration=target_duration, fast=fast, out_path=tmp_path,
+                base=0.25, span=0.72,
+            )
+            os.replace(tmp_path, final_path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        report(1.0, f"완성했습니다: {final_path.name}")
+        return {
+            "path": str(final_path),
+            "filename": final_path.name,
+            "duration": _round3(target_duration),
+            "elapsed": round(time.monotonic() - started, 2),
+            "width": canvas_w, "height": canvas_h,
+            "source_width": canvas_w, "source_height": canvas_h,
+            "image_count": len(images),
+            "ass": None,
+            "framing": {"aspect": conf["aspect"], "fit": conf["fit"], "changed": True},
+        }
+
+    # ── 자막이 있으면 **두 번에 나눠** 만든다 ──────────────────
     #
-    # 처음에 `-vf "fps=30,…"` 을 썼더니 결과 영상의 시작 시각이 6초로 밀려
-    # **앞의 사진 두 장이 통째로 사라졌다** (길이도 90초가 아니라 84초였다).
-    # 오류도 경고도 없었다. -r 로 바꾸니 시작 0초, 2700프레임, 정확히 90.000초가 나왔다.
-    video_filter = framing.chain(subtitle_filter or "", "format=yuv420p")
+    # 왜 한 번에 못 하는가 (실험으로 확인한 것):
+    #   사진 한 장은 프레임이 하나뿐이라, 필터그래프가 보는 순간이 0초·3초·6초… 뿐이다.
+    #   그 사이에 걸린 자막은 **그려질 기회가 아예 없어** 자막이 한 글자도 안 들어간다.
+    #   그렇다고 `fps` 필터로 프레임을 촘촘히 만들면 이번에는 **사진 순서가 망가진다**
+    #   (t=1초·4초·7초가 전부 3번째 사진이 되었다. start_time=0 을 줘도 마찬가지였다).
+    #   둘 다 오류 없이 조용히 틀린다.
+    #
+    # 그래서 ① 사진만으로 30프레임짜리 영상을 먼저 만들고
+    #        ② 그 영상에 **이미 검증된 자막 번인 코드**를 그대로 쓴다.
+    # 한 번 더 인코딩하는 값을 치르지만, 자막 위치·글꼴·경로 처리를 다시 만들지 않는다.
+    stage = work / "slides_stage.mp4"
+    stage.unlink(missing_ok=True)
+    try:
+        _encode_concat(
+            report, work=work, list_name=list_path.name, audio=audio,
+            target_duration=target_duration, fast=fast, out_path=stage,
+            base=0.22, span=0.38,
+        )
 
-    tmp_path = out_folder / f".{final_path.stem}.tmp{final_path.suffix}"
-    tmp_path.unlink(missing_ok=True)
+        def _later(fraction: float, message: str) -> None:
+            """두 번째 단계의 진행률을 뒤쪽 구간(0.60~1.00)에 옮겨 놓는다."""
+            report(0.60 + 0.40 * max(0.0, min(1.0, fraction)), message)
 
+        result = burn_subtitles(
+            _later,
+            video_path=stage,
+            segments=segments,
+            style=style_map.normalize(style),
+            out_dir=out_folder,
+            out_name=out_name,
+            fast=fast,
+            output=None,   # 이미 캔버스 크기다. 여기서 또 자르면 두 번 잘린다.
+        )
+    finally:
+        stage.unlink(missing_ok=True)
+
+    result["elapsed"] = round(time.monotonic() - started, 2)
+    result["image_count"] = len(images)
+    result["framing"] = {"aspect": conf["aspect"], "fit": conf["fit"], "changed": True}
+    report(1.0, f"완성했습니다: {result['filename']}")
+    return result
+
+
+def _encode_concat(
+    report: Reporter,
+    *,
+    work: Path,
+    list_name: str,
+    audio: Path | None,
+    target_duration: float,
+    fast: bool,
+    out_path: Path,
+    base: float,
+    span: float,
+) -> None:
+    """이어붙이기 목록으로 영상 하나를 만든다 (자막 없음).
+
+    프레임률은 **필터가 아니라 출력 옵션 `-r` 로** 정한다. `fps` 필터를 쓰면
+    사진 순서가 망가진다 (memory/fps-filter-eats-the-first-images.md).
+    길이는 `-t` 로 못 박는다 — 이어붙이기 목록은 마지막 장이 제 시간만큼 보이도록
+    마지막 줄을 되풀이해 적는데, 그러면 결과가 한 장 길이만큼 길어지기 때문이다.
+    """
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-f", "concat", "-safe", "0", "-i", list_path.name,
+        "-f", "concat", "-safe", "0", "-i", list_name,
     ]
     if audio:
         cmd += ["-i", str(audio)]
-    cmd += ["-vf", video_filter]
+    cmd += ["-vf", "format=yuv420p"]
     if audio:
         cmd += ["-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "192k"]
-    # 길이는 언제나 -t 로 못 박는다.
-    # 이어붙이기 목록은 마지막 장이 제 시간만큼 보이도록 마지막 줄을 되풀이해 적는데,
-    # 그러면 결과가 한 장 길이만큼 길어진다. -t 가 그 꼬리를 정확히 잘라 준다.
-    cmd += ["-t", f"{target_duration:.3f}", "-r", str(FPS)]
     cmd += [
+        "-t", f"{target_duration:.3f}",
+        "-r", str(FPS),
+        "-fps_mode", "cfr",
         "-c:v", "libx264",
         "-crf", "23" if fast else "20",
         "-preset", "veryfast" if fast else "medium",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
         "-progress", "pipe:1", "-nostats",
-        str(tmp_path),
+        str(out_path),
     ]
 
-    started = time.monotonic()
-    try:
-        _run_with_progress(
-            cmd,
-            target_duration,
-            report,
-            "영상을 만들고 있습니다",
-            base=0.25,
-            cwd=str(work),
-        )
-        if not tmp_path.is_file() or tmp_path.stat().st_size == 0:
-            raise RenderError("영상이 만들어지지 않았습니다. 사진 파일을 확인해 주세요.")
-        os.replace(tmp_path, final_path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    def _scaled(fraction: float, message: str) -> None:
+        report(base + span * max(0.0, min(1.0, fraction)), message)
 
-    elapsed = time.monotonic() - started
-    report(1.0, f"완성했습니다: {final_path.name}")
-
-    return {
-        "path": str(final_path),
-        "filename": final_path.name,
-        "duration": round(target_duration, 3),
-        "elapsed": round(elapsed, 2),
-        "width": canvas_w,
-        "height": canvas_h,
-        "source_width": canvas_w,
-        "source_height": canvas_h,
-        "image_count": len(images),
-        "ass": str(ass_path) if ass_path else None,
-        "framing": {"aspect": conf["aspect"], "fit": conf["fit"], "changed": True},
-    }
+    _run_with_progress(
+        cmd, target_duration, _scaled, "사진을 이어 붙이고 있습니다", base=0.0, cwd=str(work)
+    )
+    if not out_path.is_file() or out_path.stat().st_size == 0:
+        raise RenderError("영상이 만들어지지 않았습니다. 사진 파일을 확인해 주세요.")
