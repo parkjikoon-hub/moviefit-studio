@@ -82,6 +82,23 @@ def sample_images(count: int) -> list[Path]:
     return files[:count]
 
 
+SONG = ROOT / "tests" / "sample" / "sample_song.mp3"
+
+
+def ensure_song(seconds: float = 12.0) -> Path:
+    """점검용 음원. 없으면 만든다 (저장소에는 넣지 않는다 — 용량 절약)."""
+    if SONG.is_file():
+        return SONG
+    SONG.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", f"sine=frequency=440:duration={seconds}",
+         "-c:a", "libmp3lame", "-b:a", "128k", str(SONG)],
+        check=True, timeout=180,
+    )
+    return SONG
+
+
 def probe_size(path: Path) -> tuple[int, int]:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -479,6 +496,80 @@ else:
         "한글이 네모(□)가 아니다 (서로 다른 글자가 서로 다르게 그려진다)",
         ink_a > 0 and differ / max(1, min(ink_a, ink_b)) > 0.25,
         f"두 글자열의 그림이 {differ}픽셀 다르다 (글자 픽셀 {min(ink_a, ink_b)}개 대비)",
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 4. 단계 5 — 음원 영상 (mp3 + 가사 + 사진)
+# ══════════════════════════════════════════════════════════════
+print("\n=== 단계 5 · 음원 영상 ===")
+
+song = ensure_song(12.0)
+song_seconds = probe_duration(song)
+check("점검용 음원이 준비되었다", song_seconds > 5, f"{song_seconds:.3f}초")
+
+music = api(
+    "/api/projects", "POST",
+    {"name": "점검_음원영상", "audio_path": str(song), "mode": "video"},
+)
+made_projects.append(music["id"])
+check("mp3 하나로 프로젝트가 만들어진다", music.get("audio_path") == str(song))
+
+# 음원과 가사는 있는데 사진이 없으면 화면에 보일 것이 없다.
+# 실제로 흔한 상태다 — 음원으로 시작해 가사를 먼저 찍고 사진을 깜빡한 경우.
+music["segments"] = [{"id": "s1", "start": 0.0, "end": 4.0, "text": "가사 한 줄"}]
+api(f"/api/projects/{music['id']}", "PUT", music)
+code, detail = api_error(
+    f"/api/projects/{music['id']}/render", "POST", {"kind": "burn"},
+)
+check(
+    "음원만 있고 사진이 없으면 무엇을 해야 하는지 알려 준다",
+    code == 400 and "사진" in detail,
+    detail[:70],
+)
+
+# 사진 3장 + 가사 3줄을 짝지어 넣는다.
+LYRIC_TIMES = [(0.0, 4.0), (4.0, 8.0), (8.0, 12.0)]
+music["images"] = [
+    {"id": f"i{i + 1:03d}", "path": str(p), "duration": 3.0, "seg_id": f"s{i + 1}"}
+    for i, p in enumerate(sample_images(3))
+]
+music["segments"] = [
+    {"id": f"s{i + 1}", "start": s, "end": e, "text": f"가사 {i + 1}번째 줄"}
+    for i, (s, e) in enumerate(LYRIC_TIMES)
+]
+music["canvas"] = {"width": 1080, "height": 1920}
+music["output"] = {"aspect": "9:16", "fit": "crop", "focus_x": 50.0, "focus_y": 50.0,
+                   "pad_blur": True}
+api(f"/api/projects/{music['id']}", "PUT", music)
+
+made = run_job(api(f"/api/projects/{music['id']}/render", "POST", {"kind": "burn"})["job_id"])
+song_video = Path(made["path"])
+check("사진과 가사를 짝지은 음원 영상이 만들어졌다", song_video.is_file(), song_video.name)
+
+video_seconds = probe_duration(song_video)
+check(
+    "영상 길이가 음원 길이와 0.1초 이내로 같다",
+    abs(video_seconds - song_seconds) <= 0.1,
+    f"음원 {song_seconds:.3f}초 · 영상 {video_seconds:.3f}초 (차이 {abs(video_seconds - song_seconds):.3f}초)",
+)
+
+streams = subprocess.run(
+    ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(song_video)],
+    capture_output=True, text=True, timeout=120,
+).stdout
+check("영상에 소리 트랙이 들어 있다", "audio" in streams, streams.replace("\n", " ").strip())
+
+# ── 각 가사 줄이 시작되는 순간에 사진이 바뀌는가 ────────────────
+# 가사 시작 +0.1초 지점의 화면 색을 그 줄에 짝지은 사진과 대조한다.
+three = sample_images(3)
+for i, (start, _end) in enumerate(LYRIC_TIMES):
+    want = image_color(three[i])
+    got = frame_color(song_video, start + 0.1)
+    check(
+        f"{i + 1}번째 가사가 시작되는 {start:.1f}초에 {i + 1}번째 사진이 나온다",
+        close_color(got, want),
+        f"기대 RGB{want} / 실제 RGB{got}",
     )
 
 

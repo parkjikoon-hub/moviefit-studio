@@ -281,6 +281,114 @@ try:
                 f"화면에서 {want_y:.2f}% · 영상에서 {got_y:.2f}% (차이 {abs(got_y - want_y):.2f}%)",
             )
 
+    # ══════════════════════════════════════════════════════════
+    # 단계 5 — 음원 영상을 화면에서 실제로 다뤄 본다
+    # ══════════════════════════════════════════════════════════
+    print("\n=== 음원 영상: 소리 · 두드려 맞추기 · 안내 문구 ===")
+    song = ROOT / "tests" / "sample" / "sample_song.mp3"
+    if not song.is_file():
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "sine=frequency=440:duration=12",
+             "-c:a", "libmp3lame", "-b:a", "128k", str(song)],
+            check=True, timeout=180,
+        )
+
+    mp = api("/api/projects", "POST",
+             {"name": "화면점검_음원", "audio_path": str(song), "mode": "video"})
+    mpid = mp["id"]
+    made.append(mpid)
+    mp["images"] = [
+        {"id": f"i{i + 1:03d}", "path": str(p), "duration": 3.0, "seg_id": None}
+        for i, p in enumerate(photos[:3])
+    ]
+    mp["segments"] = [
+        {"id": "s1", "start": 0.0, "end": 4.0, "text": "가사 첫 줄"},
+        {"id": "s2", "start": 4.0, "end": 8.0, "text": "가사 둘째 줄"},
+        {"id": "s3", "start": 8.0, "end": 12.0, "text": "가사 셋째 줄"},
+    ]
+    mp["canvas"] = {"width": 1080, "height": 1920}
+    mp["output"] = {"aspect": "9:16", "fit": "crop", "focus_x": 50.0, "focus_y": 50.0,
+                    "pad_blur": True}
+    api(f"/api/projects/{mpid}", "PUT", mp)
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page(viewport={"width": 1600, "height": 950})
+        errs: list[str] = []
+        page.on("pageerror", lambda e: errs.append(str(e)))
+        page.goto(f"{BASE}/?project={mpid}", wait_until="networkidle")
+        dismiss_coach(page)
+        page.wait_for_function("document.querySelector('#player').duration > 0", timeout=20000)
+        page.wait_for_timeout(400)
+
+        dur = page.evaluate("document.querySelector('#player').duration")
+        check("mp3 를 넣으면 재생 길이가 잡힌다", abs(dur - 12.0) < 0.5, f"{dur:.2f}초")
+        src = page.evaluate("document.querySelector('#player').getAttribute('src')")
+        check("소리가 mp3 에서 나온다 (음원 주소가 물려 있다)", "/audio" in (src or ""), src or "")
+
+        page.evaluate("document.querySelector('#player').currentTime = 0")
+        page.locator("#btn-play").click()
+        page.wait_for_timeout(1500)
+        moved = page.evaluate("document.querySelector('#player').currentTime")
+        muted = page.evaluate("document.querySelector('#player').muted")
+        check("재생을 누르니 시간이 흐른다", moved > 0.4, f"{moved:.2f}초")
+        check("소리가 꺼져 있지 않다", muted is False, f"muted={muted}")
+        page.locator("#btn-play").click()
+
+        # ── 두드려 맞추기: 실제로 스페이스바를 눌러 가사 시각을 찍는다 ──
+        page.evaluate("""() => {
+          project.segments = [
+            {id: 's1', start: 0, end: 1, text: '가사 첫 줄'},
+            {id: 's2', start: 1, end: 2, text: '가사 둘째 줄'},
+            {id: 's3', start: 2, end: 3, text: '가사 셋째 줄'},
+          ];
+          renderAll();
+        }""")
+        page.wait_for_timeout(200)
+        tap = page.locator("#btn-tapsync")
+        check("[두드려 맞추기] 단추가 있다", tap.count() > 0)
+        tap.click()
+        page.wait_for_timeout(200)
+
+        marks = []
+        for at in (1.5, 5.0, 9.25):
+            page.evaluate(f"document.querySelector('#player').currentTime = {at}")
+            page.wait_for_timeout(250)
+            page.keyboard.press("Space")
+            page.wait_for_timeout(250)
+            marks.append(at)
+        page.wait_for_timeout(300)
+        starts = json.loads(page.evaluate("JSON.stringify(project.segments.map(s => s.start))"))
+        close = all(abs(starts[i] - marks[i]) < 0.35 for i in range(3))
+        check(
+            "스페이스바로 가사 3줄의 시작 시각을 찍을 수 있다",
+            close,
+            f"누른 시각 {marks} → 찍힌 시각 {starts}",
+        )
+
+        # ── 사진 수와 가사 줄 수가 다를 때 미리 알려 주는가 ──
+        page.evaluate("""() => {
+          project.images.push({id: 'iX', path: project.images[0].path, duration: 3, seg_id: null});
+          afterPhotosChanged();
+        }""")
+        page.locator("#btn-photo-pair").click()
+        page.wait_for_timeout(400)
+        warn = page.locator("#photo-warning")
+        text = warn.inner_text() if warn.count() and warn.is_visible() else ""
+        check(
+            "사진 수와 가사 줄 수가 다르면 무슨 일이 벌어지는지 한국어로 알려 준다",
+            warn.is_visible() and "사진" in text and "가사" in text,
+            text.replace("\n", " ")[:110],
+        )
+
+        # 짝지으면 목록에 어느 가사에 붙었는지 보인다
+        first_row = page.locator("#photo-list .photo-item .photo-name").first.inner_text()
+        check("사진 목록에 어느 가사 줄에 붙었는지 보인다", "♪" in first_row, first_row[:40])
+
+        check("음원 화면에서 자바스크립트 오류가 나지 않았다", not errs, " / ".join(errs[:2]))
+        browser.close()
+
 finally:
     for p in made:
         try:

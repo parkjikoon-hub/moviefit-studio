@@ -492,6 +492,13 @@ function renderPhotoPanel() {
     `사진 ${images.length}장 · 전체 ${fmtTime(total)}` +
     (hasOwnAudio() ? " (길이는 음원에 맞춰집니다)" : "");
 
+  const warn = $("#photo-warning");
+  if (warn) {
+    const message = photoMismatchWarning();
+    warn.textContent = message ? `⚠ ${message}` : "";
+    warn.hidden = !message;
+  }
+
   list.innerHTML = "";
   images.forEach((img, index) => {
     const row = resolved.find((r) => r.index === index);
@@ -506,8 +513,16 @@ function renderPhotoPanel() {
 
     const name = document.createElement("span");
     name.className = "photo-name";
-    name.textContent = String(img.path).split(/[\\/]/).pop();
-    name.title = img.path;
+    // 가사 줄에 짝지어져 있으면 파일 이름보다 **그 가사**를 보여 준다.
+    // 어느 사진이 어느 줄에 붙었는지가 노래 영상에서 훨씬 중요한 정보다.
+    const pairedSeg = img.seg_id ? segments().find((s) => s.id === img.seg_id) : null;
+    if (pairedSeg) {
+      name.textContent = `♪ ${pairedSeg.text || "(빈 줄)"}`;
+      name.title = `이 사진은 「${pairedSeg.text}」 가 시작할 때 나옵니다\n${img.path}`;
+    } else {
+      name.textContent = String(img.path).split(/[\\/]/).pop();
+      name.title = img.path;
+    }
 
     const secs = document.createElement("input");
     secs.type = "number"; secs.min = "0.2"; secs.step = "0.1";
@@ -618,6 +633,72 @@ function wirePhotoPanel() {
       toast(`사진마다 ${secs}초로 맞췄습니다.`);
     });
   }
+
+  // 노래 영상: 사진을 가사 줄에 순서대로 붙인다. 첫 사진↔첫 줄, 둘째↔둘째 …
+  const pair = $("#btn-photo-pair");
+  if (pair) {
+    pair.addEventListener("click", () => {
+      const segs = segments();
+      if (!hasImages()) { toast("사진이 없습니다.", { error: true }); return; }
+      if (!segs.length) { toast("가사(자막)가 없습니다. 먼저 가사를 넣어 주세요.", { error: true }); return; }
+      snapshot();
+      projectImages().forEach((img, i) => { img.seg_id = i < segs.length ? segs[i].id : null; });
+      afterPhotosChanged();
+      const paired = Math.min(projectImages().length, segs.length);
+      toast(`사진 ${paired}장을 가사 줄에 맞췄습니다.`);
+    });
+  }
+
+  const unpair = $("#btn-photo-unpair");
+  if (unpair) {
+    unpair.addEventListener("click", () => {
+      if (!hasImages()) return;
+      snapshot();
+      for (const img of projectImages()) img.seg_id = null;
+      afterPhotosChanged();
+      toast("짝짓기를 풀었습니다. 이제 장당 시간대로 넘어갑니다.");
+    });
+  }
+}
+
+/** 사진·가사·음원의 길이가 안 맞을 때 무슨 일이 벌어지는지 한국어로 알려 준다.
+ *
+ *  내보내고 나서야 "뒤쪽 사진이 안 나왔다"는 것을 알면 다시 만들어야 한다.
+ *  숫자와 함께 **결과가 어떻게 되는지**를 말해 준다. */
+function photoMismatchWarning() {
+  if (!project || !hasImages()) return null;
+
+  const images = projectImages();
+  const segs = segments();
+  const paired = images.filter((img) => img.seg_id).length;
+  const notes = [];
+
+  if (paired > 0 && images.length !== segs.length) {
+    if (images.length < segs.length) {
+      notes.push(
+        `사진이 ${images.length}장인데 가사는 ${segs.length}줄입니다. ` +
+        `${images.length}번째 사진이 마지막 가사까지 계속 보입니다.`
+      );
+    } else {
+      notes.push(
+        `사진이 ${images.length}장인데 가사는 ${segs.length}줄입니다. ` +
+        `짝을 못 찾은 뒤쪽 사진 ${images.length - segs.length}장은 각자 정해진 시간만큼 나옵니다.`
+      );
+    }
+  }
+
+  const total = photoTotalSeconds();
+  const song = $("#player") && isFinite($("#player").duration) ? $("#player").duration : 0;
+  if (hasOwnAudio() && song > 0.1 && total > 0.1) {
+    const gap = song - total;
+    if (gap > 0.5) {
+      notes.push(`음원이 사진보다 ${gap.toFixed(1)}초 깁니다. 마지막 사진이 그만큼 더 보입니다.`);
+    } else if (gap < -0.5) {
+      notes.push(`사진이 음원보다 ${(-gap).toFixed(1)}초 깁니다. 뒷부분은 잘려 나갑니다.`);
+    }
+  }
+
+  return notes.length ? notes.join(" ") : null;
 }
 
 /** 사진 프로젝트의 미리보기를 지금 상태에 맞춘다 (사진 목록·자막·화면비가 바뀔 때). */
@@ -2220,6 +2301,15 @@ async function openExportDialog() {
       warnBox.hidden = false;
     }
   } catch (_) { /* 경고를 못 받아도 내보내기 자체는 막지 않는다 */ }
+
+  // 사진·가사·음원의 길이가 안 맞으면 여기서도 알린다. 왼쪽 [사진] 칸에도 같은
+  // 문구가 뜨지만, 내보내기 직전에 다시 보여 주지 않으면 그냥 지나친다.
+  const photoNote = photoMismatchWarning();
+  if (photoNote) {
+    exportWarning = exportWarning ? `${exportWarning}\n${photoNote}` : photoNote;
+    warnBox.textContent = `⚠ ${exportWarning}`;
+    warnBox.hidden = false;
+  }
 
   // 화면비를 바꿔 두었으면 어떤 크기로 나가는지 내보내기 직전에 한 번 더 알린다.
   // 설정 화면을 떠난 뒤 한참 있다 내보내는 경우가 많아 여기서 다시 보여 줘야 한다.

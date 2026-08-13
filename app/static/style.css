@@ -360,6 +360,11 @@ body.is-resizing .splitter { pointer-events: auto; }
 .chk { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-dim); margin: 6px 0 10px; cursor: pointer; }
 .chk input { accent-color: var(--accent); width: 15px; height: 15px; }
 .hint { color: var(--text-dim); font-size: 12px; margin: 8px 0 0; line-height: 1.6; }
+/* 결과가 뜻과 달라질 때 알려 주는 문구. 그냥 설명(hint)과 눈에 띄게 갈라 놓는다. */
+.hint-warn {
+  color: var(--warn, #E8B84B); border: 1px solid var(--warn, #E8B84B);
+  border-radius: var(--radius); padding: 6px 8px; background: rgba(232, 184, 75, .08);
+}
 .file-info { background: var(--bg); border: 1px solid var(--line); border-radius: 3px; padding: 9px; font-size: 12px; color: var(--text-dim); word-break: break-all; }
 
 .script-input {
