@@ -307,6 +307,17 @@ ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\app\static\icons\favicon.ico
 LicenseFile={#LicenseFile}
+; 프로그램이 켜져 있는 채로 설치하면 파일이 잠겨 있어 **조용히 실패한다.**
+; 오류도 안 나고 옛 버전이 그대로 남아, 사용자는 새 버전을 설치했다고 믿는다.
+; 프로그램이 켜질 때 남기는 표시(app/__main__.py 의 RUNNING_MARK)를 여기서 확인해
+; 설치를 시작하기 전에 멈추고 안내한다. 이름을 바꾸면 양쪽을 함께 바꿔야 한다.
+AppMutex=MovieFitStudioRunning
+
+[Messages]
+; 위 AppMutex 에 걸렸을 때 나오는 안내. 기본 문구는 "응용 프로그램"이라고만 해서
+; 무엇을 어떻게 닫으라는 것인지 알 수 없다.
+SetupAppRunningError=MovieFit Studio 가 지금 실행 중입니다.%n%n먼저 프로그램을 닫아 주세요.%n브라우저 탭만 닫아서는 꺼지지 않습니다. 제목이 "MovieFit Studio" 인 검은 명령 창을 닫아야 완전히 종료됩니다.%n%n닫으신 뒤 [확인]을 누르면 설치를 계속합니다.
+UninstallAppRunningError=MovieFit Studio 가 지금 실행 중입니다.%n%n제목이 "MovieFit Studio" 인 검은 명령 창을 닫으신 뒤 [확인]을 눌러 주세요.
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Default.isl"
