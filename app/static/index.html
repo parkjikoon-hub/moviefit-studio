@@ -46,7 +46,13 @@
 
     <footer class="start-foot">
       <span id="env-info"></span>
-      <button id="btn-install" class="btn btn-tiny" hidden>앱으로 설치</button>
+      <div class="start-foot-actions">
+        <!-- 설명서가 있다는 사실 자체를 모르는 사람이 많았다. 첫 화면에 길을 낸다.
+             프로그램 안에 들어 있으므로 인터넷이 없어도 열린다. -->
+        <a id="link-guide" class="btn btn-tiny" href="/guide.html" target="_blank" rel="noopener"
+           title="처음 쓰는 분을 위한 안내입니다 (새 탭에서 열립니다)">사용설명서</a>
+        <button id="btn-install" class="btn btn-tiny" hidden>앱으로 설치</button>
+      </div>
     </footer>
   </div>
 </section>
@@ -67,6 +73,9 @@
       <button id="mode-script" class="mode-btn" role="tab">대본 모드</button>
     </div>
     <div class="tb-right">
+      <!-- 작업 중에도 설명서를 볼 수 있어야 한다. 새 탭에서 열어 하던 일을 잃지 않게 한다. -->
+      <a id="link-guide-top" class="btn btn-icon" href="/guide.html" target="_blank" rel="noopener"
+         title="사용설명서 (새 탭에서 열립니다)" aria-label="사용설명서">?</a>
       <!-- 상태 표시이면서 단추다. 사용자가 실제로 눌러 보려 했으므로 누르면 즉시 저장한다
            (자동 저장은 2초 뒤에 도는데, 지금 저장됐는지 확인하고 싶을 때가 있다) -->
       <button id="save-state" class="save-state" type="button"

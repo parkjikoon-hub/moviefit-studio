@@ -1,0 +1,89 @@
+/* 프로그램 안에서 여는 사용설명서(guide.html)의 배치 규칙.
+   guide.html 은 tools/build_guide.py 가 만들어 내지만, 이 파일은 사람이 고친다.
+
+   색을 여기에 적지 않는다. style.css 의 :root 변수만 쓴다.
+   색 값을 베껴 두면 나중에 화면 색을 바꿀 때 이 파일만 옛 색으로 남는다
+   (memory/design-change-has-copies-elsewhere.md 의 교훈).
+   소개 사이트 쪽 같은 규칙은 landing/style.css 에 있고 변수 이름이 다르다
+   (--dim ↔ --text-dim, --accent ↔ --cream 등). 그래서 한 파일을 공유하지 않는다. */
+
+.guide-page {
+  background: var(--bg);
+  color: var(--text);
+  overflow: auto;          /* 작업 화면은 스크롤을 막지만 설명서는 길어서 굴려야 한다 */
+  height: auto;
+}
+
+/* 위쪽 띠 — 돌아가는 길을 항상 보이게 고정한다 */
+.guide-bar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 20px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-2);
+}
+.guide-bar-title { font-weight: 700; letter-spacing: -0.01em; }
+.guide-bar-hint { color: var(--text-dim); font-size: 0.86rem; }
+.guide-bar-ver { margin-left: auto; color: var(--text-dim); font-size: 0.86rem; }
+@media (max-width: 560px) { .guide-bar-hint { display: none; } }
+
+.guide { max-width: 900px; margin: 0 auto; padding: 0 20px 80px; }
+
+.guide-head { padding: 40px 0 8px; }
+.guide-head h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); margin: 0 0 10px; }
+.guide-head .sub { color: var(--text-dim); }
+
+.guide h2 {
+  font-size: 1.4rem; margin: 56px 0 14px; padding-bottom: 10px;
+  border-bottom: 2px solid var(--line-outer);
+}
+.guide h3 { font-size: 1.08rem; margin: 28px 0 8px; color: var(--text); }
+.guide p { color: var(--text-dim); margin: 10px 0; text-align: justify; word-break: normal; }
+.guide ul, .guide ol { margin: 10px 0; padding-left: 22px; color: var(--text-dim); }
+.guide ul { list-style: disc; }
+.guide ol { list-style: decimal; }
+.guide li { margin: 6px 0; text-align: justify; word-break: normal; }
+.guide strong, .guide b { color: var(--text); }
+.guide code {
+  background: var(--bg-2); border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm); padding: 1px 5px; font-size: 0.9em;
+}
+.guide a { color: var(--cream); }
+
+.guide table {
+  width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.94rem;
+  border: 1px solid var(--line-cream);
+}
+.guide th, .guide td {
+  border: 1px solid var(--line-cream); padding: 10px 12px;
+  text-align: left; vertical-align: top; color: var(--text-dim);
+  word-break: normal;
+}
+.guide th { background: var(--bg-2); color: var(--text); font-weight: 700; white-space: nowrap; }
+
+.guide .tip {
+  margin: 18px 0; padding: 14px 16px; font-size: 0.93rem; color: var(--text-dim);
+  background: var(--bg-2); border: 1px solid var(--line-cream);
+  border-left: 3px solid var(--cream); border-radius: var(--radius);
+  text-align: justify; word-break: normal;
+}
+
+/* 목차 */
+.guide .toc {
+  background: var(--bg-1); border: 2px solid var(--line-outer);
+  border-radius: var(--radius); padding: 22px 26px; margin: 28px 0 8px;
+}
+.guide .toc h2 { font-size: 1.02rem; margin: 0 0 12px; border: none; padding: 0; }
+.guide .toc ol { columns: 2; column-gap: 32px; margin: 0; padding-left: 20px; }
+@media (max-width: 640px) { .guide .toc ol { columns: 1; } }
+.guide .toc a { color: var(--text-dim); text-decoration: none; }
+.guide .toc a:hover { color: var(--cream); }
+
+/* 화면에 보이는 단추 이름 */
+.guide .ui {
+  color: var(--text); background: var(--bg-2);
+  border: 1px solid var(--line-cream); border-radius: var(--radius);
+  padding: 1px 7px; font-size: 0.92em; white-space: nowrap;
+}
+
+.guide-foot { margin: 56px 0 0; padding-top: 28px; border-top: 1px solid var(--line-2); }

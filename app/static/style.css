@@ -99,6 +99,7 @@ button, input, select, textarea {
   color: var(--text);
   border: 1px solid var(--line-2); border-radius: var(--radius);
   padding: 8px 14px; cursor: pointer; white-space: nowrap;
+  text-decoration: none;           /* <a> 를 단추 모양으로 쓸 때 밑줄이 생기지 않게 */
   min-width: 96px;                 /* 크기를 맞춰 두면 줄이 가지런해 보인다 */
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   box-shadow: var(--raise);
@@ -207,6 +208,8 @@ button, input, select, textarea {
   margin-top: 34px; display: flex; align-items: center; justify-content: space-between;
   color: var(--text-dim); font-size: 12px;
 }
+/* 오른쪽 단추들은 한 덩어리로 묶는다. 하나가 숨겨져도 자리가 벌어지지 않는다. */
+.start-foot-actions { display: flex; align-items: center; gap: 8px; }
 
 /* ── 작업 화면 레이아웃 ─────────────────────────────────── */
 #view-editor { display: flex; flex-direction: column; }
