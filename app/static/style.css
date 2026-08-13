@@ -510,8 +510,17 @@ body.is-resizing .splitter { pointer-events: auto; }
   border-radius: 2px; word-break: keep-all;
 }
 
-/* 미리보기 위에 겹치는 화면비 틀 */
-.frame-guide { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+/* 자막이 출력 틀 밖으로 나갈 때의 경고 */
+.fit-warn {
+  margin-top: 8px; padding: 8px 9px; font-size: 11px; line-height: 1.6;
+  color: #FBBF24; background: rgba(251, 191, 36, .10);
+  border: 1px solid rgba(251, 191, 36, .55); border-radius: 2px; word-break: keep-all;
+}
+
+/* 미리보기 위에 겹치는 화면비 틀.
+   겹침 순서가 중요하다 — 틀이 자막 위에 덮이면 자막을 마우스로 끌 수 없게 된다.
+   자막(2) > 화면비 틀(1) 순서로 두어 자막 위를 누르면 자막이, 그 밖을 누르면 틀이 잡힌다. */
+.frame-guide { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
 .fg-window {
   position: absolute; box-sizing: border-box;
   border: 2px solid var(--cream);
@@ -574,7 +583,7 @@ body.is-resizing .splitter { pointer-events: auto; }
 .video-box.is-empty .no-video { position: static; transform: none; }
 
 .subtitle-overlay {
-  position: absolute; left: 50%; top: 88%;
+  position: absolute; left: 50%; top: 88%; z-index: 2;  /* 화면비 틀보다 위 (위 설명 참고) */
   transform: translate(-50%, -50%);
   max-width: 92%; text-align: center; white-space: pre-wrap; line-height: 1.3;
   cursor: grab; user-select: none;

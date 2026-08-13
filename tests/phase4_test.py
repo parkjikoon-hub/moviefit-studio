@@ -244,6 +244,34 @@ check("이상한 값을 보내면 조용히 기본값으로 되돌린다",
       rbad["aspect"] == "source" and rbad["fit"] == "crop",
       f"aspect={rbad['aspect']} fit={rbad['fit']}")
 
+# 세로 원본을 가로로 바꾸는 경우 — 이때만 focus_y 가 쓰인다 (가로 원본에서는 안 쓰인다)
+rv0 = api("/api/system/framing?w=1080&h=1920&aspect=16:9&fit=crop&focus_y=0")
+rv100 = api("/api/system/framing?w=1080&h=1920&aspect=16:9&fit=crop&focus_y=100")
+check("세로 원본을 가로로 바꾸면 위아래를 자르고, focus_y 가 실제로 쓰인다",
+      rv0["crop"]["y"] == 0 and rv100["crop"]["y"] == 1920 - rv0["height"],
+      f"위 끝 y={rv0['crop']['y']} / 아래 끝 y={rv100['crop']['y']} (틀 높이 {rv0['height']})")
+
+# 위 계산이 실제 영상에서도 맞는지 — 세로 영상을 하나 만들어 직접 잘라 본다
+_tall = Path(os.environ.get("TEMP", ".")) / "moviefit_tall_sample.mp4"
+subprocess.run(
+    ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+     "-f", "lavfi", "-i", "testsrc=size=360x640:rate=15:duration=2",
+     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(_tall)],
+    capture_output=True, timeout=120, check=True,
+)
+_tw, _th = probe_size(_tall)
+_want = api(f"/api/system/framing?w={_tw}&h={_th}&aspect=16:9&fit=crop&focus_y=50")
+_out = Path(os.environ.get("TEMP", ".")) / "moviefit_tall_out.mp4"
+subprocess.run(
+    ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(_tall),
+     "-vf", _want["filter"], "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", str(_out)],
+    capture_output=True, timeout=120, check=True,
+)
+check(f"세로 영상 {_tw}×{_th} 을 16:9 로 자르면 실제로 {_want['width']}×{_want['height']} 이 된다",
+      probe_size(_out) == (_want["width"], _want["height"]), f"실제 {probe_size(_out)}")
+_tall.unlink(missing_ok=True)
+_out.unlink(missing_ok=True)
+
 
 # ══════════════════════════════════════════════════════════════
 # 4. F-D — "저장됨" 이 누를 수 있는 단추인가
@@ -368,6 +396,76 @@ right_bytes = shots[100].read_bytes()
 check("왼쪽 끝을 남길 때와 오른쪽 끝을 남길 때의 그림이 서로 다르다",
       left_bytes != right_bytes,
       f"왼쪽 {len(left_bytes)}바이트 / 오른쪽 {len(right_bytes)}바이트")
+
+# 위 검사는 "다르다"만 본다. 좌우가 뒤집혀 있어도 통과하므로, 실제로 **어느 쪽**을
+# 남겼는지 원본에서 직접 잘라 만든 기준 그림과 대조한다.
+want0 = api(f"/api/system/framing?w={SRC_W}&h={SRC_H}&aspect=9:16&fit=crop&focus_x=0")
+want100 = api(f"/api/system/framing?w={SRC_W}&h={SRC_H}&aspect=9:16&fit=crop&focus_x=100")
+ref_dir = shots[0].parent
+
+
+def crop_reference(x: int, w: int, h: int, dst: Path) -> Path:
+    """원본에서 지정한 자리를 직접 잘라 낸 기준 그림 (프로그램을 거치지 않는다)."""
+    subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+         "-i", str(SAMPLE), "-frames:v", "1", "-vf", f"crop={w}:{h}:{x}:0", str(dst)],
+        capture_output=True, timeout=120, check=True,
+    )
+    return dst
+
+
+def mean_abs_diff(a: Path, b: Path) -> float:
+    """두 그림의 평균 밝기 차이 (0이면 같은 곳을 비추고 있다)."""
+    out = []
+    for path in (a, b):
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+             "-i", str(path), "-vf", "format=gray,scale=64:64", "-f", "rawvideo", "-"],
+            capture_output=True, timeout=60,
+        )
+        out.append(r.stdout)
+    if len(out[0]) != len(out[1]) or not out[0]:
+        return 999.0
+    return sum(abs(p - q) for p, q in zip(out[0], out[1])) / len(out[0])
+
+
+# 자막이 섞이면 비교가 흐려지므로, 자막 없이 다시 만들어 그림만 비교한다
+blank_segments = [dict(s, text="") for s in proj["segments"]]
+plain_shots = {}
+for focus in (0, 100):
+    proj["output"] = {"aspect": "9:16", "fit": "crop", "focus_x": focus, "focus_y": 50,
+                      "pad_blur": True}
+    api(f"/api/projects/{pid}", "PUT", dict(proj, segments=blank_segments))
+    job = api(f"/api/projects/{pid}/render", "POST", {"kind": "preview", "preview_seconds": 2})
+    plain_shots[focus] = first_frame_png(Path(run_job(job["job_id"])["path"]),
+                                         ref_dir / f"plain{focus}.png")
+api(f"/api/projects/{pid}", "PUT", proj)
+
+ref_left = crop_reference(want0["crop"]["x"], want0["width"], want0["height"],
+                          ref_dir / "ref_left.png")
+ref_right = crop_reference(want100["crop"]["x"], want100["width"], want100["height"],
+                           ref_dir / "ref_right.png")
+
+d_ll = mean_abs_diff(plain_shots[0], ref_left)     # 왼쪽 설정 ↔ 왼쪽 기준
+d_lr = mean_abs_diff(plain_shots[0], ref_right)    # 왼쪽 설정 ↔ 오른쪽 기준
+d_rr = mean_abs_diff(plain_shots[100], ref_right)
+d_rl = mean_abs_diff(plain_shots[100], ref_left)
+check("왼쪽 끝을 고르면 실제로 원본의 왼쪽이 남는다 (좌우가 뒤집히지 않았다)",
+      d_ll < d_lr, f"왼쪽 기준과의 차이 {d_ll:.1f} < 오른쪽 기준과의 차이 {d_lr:.1f}")
+check("오른쪽 끝을 고르면 실제로 원본의 오른쪽이 남는다",
+      d_rr < d_rl, f"오른쪽 기준과의 차이 {d_rr:.1f} < 왼쪽 기준과의 차이 {d_rl:.1f}")
+
+# 미리보기(preview)만이 아니라 **자막 새긴 영상(burn)** 도 같은지 확인한다.
+# 이 둘은 같은 함수를 쓰지만, 실제로 돌려 보지 않으면 알 수 없다.
+proj["output"] = {"aspect": "9:16", "fit": "crop", "focus_x": 50, "focus_y": 50,
+                  "pad_blur": True}
+api(f"/api/projects/{pid}", "PUT", proj)
+job = api(f"/api/projects/{pid}/render", "POST", {"kind": "burn"})
+burned = Path(run_job(job["job_id"], limit=600)["path"])
+want = api(f"/api/system/framing?w={SRC_W}&h={SRC_H}&aspect=9:16&fit=crop")
+check("[자막을 새긴 영상] 도 세로 9:16 로 나온다 (미리보기만 되는 것이 아니다)",
+      probe_size(burned) == (want["width"], want["height"]),
+      f"실제 {probe_size(burned)} / 기대 ({want['width']}, {want['height']})")
 
 
 # ══════════════════════════════════════════════════════════════

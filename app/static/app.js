@@ -868,6 +868,9 @@ function updateOverlay(time) {
 
   // 재생 중인 자막 강조 + 자동 스크롤
   $$(".seg-item").forEach((el) => el.classList.toggle("is-playing", seg && el.dataset.id === seg.id));
+
+  // 자막마다 길이가 다르므로 넘침 여부도 자막이 바뀔 때마다 다시 본다
+  refreshSubtitleFitWarning();
 }
 
 /** 한 줄 최대 글자수에 맞춰 어절 단위로 줄을 나눈다 (F-11).
@@ -893,13 +896,40 @@ function wrapText(text) {
   return lines.join("\n");
 }
 
+/** 미리보기 상자 안에서 **실제로 내보내지는 틀**이 차지하는 자리 (0~1 비율).
+ *
+ *  자막 위치는 "출력 틀의 몇 %"로 저장된다. 그런데 잘라내기를 쓰면 미리보기 상자는
+ *  여전히 원본 전체를 보여 주므로, 상자를 기준으로 그리면 자막이 엉뚱한 곳에 보인다.
+ *  (실측: 1280폭 영상을 왼쪽 끝 기준 9:16으로 자를 때 미리보기 640px vs 실제 202px)
+ *  그래서 화면에 그릴 때도, 마우스로 끌 때도 반드시 이 함수를 거친다.
+ */
+function outputFrameRect() {
+  const dims = sourceDimensions();
+  const conf = currentOutput();
+  if (!dims || conf.aspect === "source") return { left: 0, top: 0, w: 1, h: 1 };
+
+  const frame = resolveFraming(dims.w, dims.h, conf);
+  // 여백 채우기는 미리보기 상자 자체가 출력 틀이다 (CSS 로 상자를 그 화면비로 만들어 둔다)
+  if (frame.fit === "pad" || !frame.crop) return { left: 0, top: 0, w: 1, h: 1 };
+
+  return {
+    left: frame.crop.x / dims.w,
+    top: frame.crop.y / dims.h,
+    w: frame.crop.w / dims.w,
+    h: frame.crop.h / dims.h,
+  };
+}
+
 function applyOverlayStyle() {
   const overlay = $("#overlay");
   const st = project?.style;
   if (!st) return;
 
   const player = $("#player");
-  const height = player.clientHeight || 360;
+  const fr = outputFrameRect();
+  // 글자 크기는 '출력 틀의 세로 픽셀' 기준이다 (style_map.to_ass_style 과 같은 규칙).
+  // 잘라내면 출력 틀의 높이가 줄어들 수 있으므로 상자 높이가 아니라 틀 높이를 써야 한다.
+  const height = (player.clientHeight || 360) * fr.h;
   const scale = height / 720;
 
   const outline = st.outline || { color: "#000", width: 2 };
@@ -935,9 +965,15 @@ function applyOverlayStyle() {
     overlay.style.padding = "0";
   }
 
+  // 저장된 값은 '출력 틀의 몇 %'다. 그것을 미리보기 상자의 몇 %인지로 옮겨 그린다.
   const [x, y] = resolvedPosition(st);
-  overlay.style.left = `${x}%`;
-  overlay.style.top = `${y}%`;
+  overlay.style.left = `${(fr.left + fr.w * x / 100) * 100}%`;
+  overlay.style.top = `${(fr.top + fr.h * y / 100) * 100}%`;
+  // 자막이 넘칠 수 있는 폭도 출력 틀 기준이어야 한다. 그래야 좁은 세로 화면에서
+  // 자막이 틀 밖으로 나가는 것이 미리보기에서 그대로 보인다.
+  overlay.style.maxWidth = `${fr.w * 92}%`;
+
+  refreshSubtitleFitWarning();
 }
 
 function resolvedPosition(st) {
@@ -961,12 +997,17 @@ function wireOverlayDrag() {
     readout.hidden = false;
 
     const rect = box.getBoundingClientRect();
+    // 화면에 그릴 때와 **똑같은 틀**을 써야 한다. 한쪽만 고치면 끌 때마다 자막이 튄다.
+    const fr = outputFrameRect();
     const onMove = (ev) => {
-      const x = clamp(((ev.clientX - rect.left) / rect.width) * 100, 0, 100);
-      const y = clamp(((ev.clientY - rect.top) / rect.height) * 100, 0, 100);
+      // 마우스가 가리킨 상자 안의 자리를 '출력 틀의 몇 %'로 되돌린다
+      const bx = (ev.clientX - rect.left) / rect.width;
+      const by = (ev.clientY - rect.top) / rect.height;
+      const x = clamp(((bx - fr.left) / fr.w) * 100, 0, 100);
+      const y = clamp(((by - fr.top) / fr.h) * 100, 0, 100);
       project.style.position = { mode: "custom", preset: project.style.position?.preset || "bottom", x: +x.toFixed(1), y: +y.toFixed(1) };
-      overlay.style.left = `${x}%`;
-      overlay.style.top = `${y}%`;
+      overlay.style.left = `${(fr.left + fr.w * x / 100) * 100}%`;
+      overlay.style.top = `${(fr.top + fr.h * y / 100) * 100}%`;
       readout.textContent = `가로 ${x.toFixed(1)}%  세로 ${y.toFixed(1)}%`;
     };
     const onUp = () => {
@@ -1497,9 +1538,10 @@ function wireEditor() {
   });
   player.addEventListener("loadedmetadata", () => {
     $("#time-total").textContent = fmtTime(player.duration);
-    applyOverlayStyle(); zoomFit();
-    // 영상 크기를 이제야 알 수 있다. 화면비 틀은 여기서 처음 제대로 그려진다.
+    // 영상 크기를 이제야 알 수 있다. 화면비 틀을 먼저 그려야 자막 위치를 그 틀 기준으로
+    // 계산할 수 있으므로 순서를 지킨다.
     syncAspectInputs(); applyFrameGuide();
+    applyOverlayStyle(); zoomFit();
   });
   player.addEventListener("error", () => {
     if (player.getAttribute("src")) toast("영상을 재생할 수 없습니다. 파일이 옮겨졌거나 지원하지 않는 형식일 수 있습니다.", { error: true });
@@ -1777,8 +1819,15 @@ async function openExportDialog() {
       const how = frame.fit === "pad"
         ? `원본 전체를 넣고 남는 곳은 ${conf.pad_blur ? "흐린 배경" : "검은색"}으로 채웁니다`
         : "가장자리를 잘라 냅니다";
-      note.textContent =
+      let text =
         `영상은 ${FR_ASPECT_LABELS[conf.aspect]} · ${frame.width}×${frame.height} 로 나갑니다 — ${how}.`;
+      // 자막이 틀 밖으로 나가 있으면 내보내기 직전에 반드시 알린다 (그냥 두면 조용히 잘린다)
+      const over = subtitleOverflow();
+      if (over) {
+        text += `\n⚠ 지금 자막이 틀 밖으로 약 ${over.sourcePixels}픽셀 넘쳐서 그만큼 잘립니다.`;
+      }
+      note.textContent = text;
+      note.style.whiteSpace = "pre-line";
       note.hidden = false;
     }
   }
@@ -2339,6 +2388,56 @@ function applyFrameGuide() {
   }
 
   updateAspectReadout({ frame, dims, conf });
+}
+
+/** 지금 보이는 자막이 출력 틀 밖으로 얼마나 나가는지 (픽셀). 안 나가면 null.
+ *
+ *  화면비를 좁히면 자막 글은 그대로인데 틀만 좁아져서, 가장자리에 둔 자막이 결과물에서
+ *  잘려 나간다. 미리보기에서 눈에 보이더라도 **말로도 알려 줘야** 놓치지 않는다.
+ */
+function subtitleOverflow() {
+  const overlay = $("#overlay");
+  const box = $("#video-box");
+  if (!overlay || !box || overlay.hidden || !(overlay.textContent || "").trim()) return null;
+
+  const fr = outputFrameRect();
+  const b = box.getBoundingClientRect();
+  const o = overlay.getBoundingClientRect();
+  if (!b.width || !b.height || !o.width) return null;
+
+  const frameLeft = b.left + b.width * fr.left;
+  const frameTop = b.top + b.height * fr.top;
+  const over = {
+    left: Math.max(0, frameLeft - o.left),
+    right: Math.max(0, o.right - (frameLeft + b.width * fr.w)),
+    top: Math.max(0, frameTop - o.top),
+    bottom: Math.max(0, o.bottom - (frameTop + b.height * fr.h)),
+  };
+  // 화면에 그려진 크기를 원본 픽셀로 환산해 둔다 (사용자에게 보여 줄 때 뜻이 통하도록)
+  const dims = sourceDimensions();
+  const perPx = dims ? dims.w / b.width : 1;
+  const worst = Math.max(over.left, over.right, over.top, over.bottom);
+  return worst > 1 ? { ...over, worst, sourcePixels: Math.round(worst * perPx) } : null;
+}
+
+/** 자막이 잘릴 상황이면 경고를 띄우고, 아니면 감춘다. */
+function refreshSubtitleFitWarning() {
+  const el = $("#subtitle-fit-warn");
+  if (!el) return;
+  const over = currentOutput().aspect === "source" ? null : subtitleOverflow();
+  if (!over) { el.hidden = true; return; }
+
+  const sides = [];
+  if (over.left > 1) sides.push("왼쪽");
+  if (over.right > 1) sides.push("오른쪽");
+  if (over.top > 1) sides.push("위");
+  if (over.bottom > 1) sides.push("아래");
+  el.textContent =
+    `⚠ 자막이 ${sides.join("·")}으로 약 ${over.sourcePixels}픽셀 넘칩니다. ` +
+    `지금 내보내면 그만큼 잘려 나갑니다. ` +
+    `자막을 안쪽으로 옮기거나, [글꼴]의 크기를 줄이거나, [줄바꿈 규칙]의 ` +
+    `'한 줄 최대 글자'를 줄여 주세요.`;
+  el.hidden = false;
 }
 
 /** 여백 채우기의 흐린 배경 영상을 본 영상과 같은 지점으로 맞춘다. */

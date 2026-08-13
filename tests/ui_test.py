@@ -256,8 +256,80 @@ try:
         check("옆의 [잘라낼 자리] 막대도 같은 값을 가리킨다",
               abs(slider_val - focus_after) < 1.5, f"막대 {slider_val} vs 설정 {focus_after}")
 
+        # ══ 미리보기의 자막이 실제 내보내기와 같은 자리인가 ══════
+        #
+        # 자막 위치는 "출력 틀의 몇 %"로 저장된다. 잘라내기를 쓰면 미리보기 상자는 여전히
+        # 원본 전체를 보여 주므로, 상자를 기준으로 그리면 자막이 엉뚱한 곳에 보인다.
+        # (고치기 전 실측: 미리보기 640px vs 실제 202px — 438픽셀 어긋남)
+        print("\n=== F-C: 미리보기의 자막 위치가 실제 결과와 같은가 ===")
+        page.evaluate("""
+            setOutput({aspect:'9:16', fit:'crop', focus_x:0}, {snap:false});
+            project.style.position = {mode:'custom', preset:'bottom', x:50, y:50};
+            syncStyleInputs(); applyOverlayStyle(); updateOverlay(1.0);
+        """)
+        page.wait_for_timeout(300)
+
+        box = page.locator("#video-box").bounding_box()
+        win = page.locator("#fg-window").bounding_box()
+        ov = page.locator("#overlay").bounding_box()
+
+        def to_src(px):
+            return (px - box["x"]) / box["width"] * src_w
+
+        win_left, win_right = to_src(win["x"]), to_src(win["x"] + win["width"])
+        ov_center = to_src(ov["x"] + ov["width"] / 2)
+        expect_center = win_left + (win_right - win_left) * 0.5
+        check("가로 50%로 둔 자막이 미리보기에서도 '자른 틀의 한가운데'에 보인다",
+              abs(ov_center - expect_center) < 8,
+              f"자막 중심 {ov_center:.0f}px / 틀 한가운데 {expect_center:.0f}px "
+              f"(자르는 틀 {win_left:.0f}~{win_right:.0f}px)")
+        check("자막이 자르는 틀 안에 들어 있다",
+              win_left - 2 <= ov_center <= win_right + 2,
+              f"{ov_center:.0f}px 이 {win_left:.0f}~{win_right:.0f} 안인가")
+
+        # 끄는 동작도 같은 기준을 쓰는가 (한쪽만 고치면 끌 때마다 자막이 튄다)
+        before_x = page.evaluate("resolvedPosition(project.style)[0]")
+        page.mouse.move(ov["x"] + ov["width"] / 2, ov["y"] + ov["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(win["x"] + win["width"] * 0.25, ov["y"] + ov["height"] / 2, steps=8)
+        page.mouse.up()
+        page.wait_for_timeout(300)
+        after_x = page.evaluate("resolvedPosition(project.style)[0]")
+        ov2 = page.locator("#overlay").bounding_box()
+        check("자막을 끌면 '자른 틀 기준'의 값으로 바뀐다 (25% 근처)",
+              abs(after_x - 25) < 8, f"{before_x}% → {after_x}%")
+        check("끈 뒤에도 자막이 화면에서 튀지 않는다 (그린 자리와 저장된 값이 일치)",
+              abs(to_src(ov2["x"] + ov2["width"] / 2)
+                  - (win_left + (win_right - win_left) * after_x / 100)) < 8,
+              f"그린 자리 {to_src(ov2['x'] + ov2['width'] / 2):.0f}px")
+
+        # ══ 자막이 잘릴 상황을 알려 주는가 ══════════════════════
+        print("\n=== F-C: 자막이 잘릴 때 알려 주는가 ===")
+        page.evaluate("""
+            setOutput({aspect:'9:16', fit:'crop', focus_x:50}, {snap:false});
+            project.segments[0].text = '아주 길어서 좁은 세로 화면에는 도저히 들어가지 않는 자막';
+            project.style.max_chars = 40;
+            project.style.position = {mode:'custom', preset:'bottom', x:88, y:50};
+            syncStyleInputs(); applyOverlayStyle(); updateOverlay(1.0);
+        """)
+        page.wait_for_timeout(350)
+        warn = page.locator("#subtitle-fit-warn")
+        check("자막이 틀 밖으로 나가면 경고가 뜬다 (조용히 잘리지 않는다)",
+              warn.is_visible(), (warn.text_content() or "")[:80])
+
+        page.evaluate("""
+            project.style.position = {mode:'custom', preset:'bottom', x:50, y:50};
+            project.style.max_chars = 12;
+            project.segments[0].text = '짧은 자막';
+            syncStyleInputs(); applyOverlayStyle(); updateOverlay(1.0);
+        """)
+        page.wait_for_timeout(350)
+        check("자막을 안쪽으로 들이면 경고가 사라진다", warn.is_hidden())
+
         # ══ 여백 채우기 ════════════════════════════════════════
         print("\n=== F-C: 여백 채우기 ===")
+        page.locator('[data-aspect="9:16"]').click()   # '원본 그대로'면 아래 단추들이 감춰진다
+        page.wait_for_timeout(250)
         page.locator('[data-fit="pad"]').click()
         page.wait_for_timeout(400)
         check("[여백 채우기] 로 바꿀 수 있다", page.evaluate("currentOutput().fit") == "pad")
