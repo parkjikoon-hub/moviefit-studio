@@ -399,10 +399,31 @@ try:
         guide_tab.close()
 
         # ══ 자바스크립트 오류가 없었는가 ════════════════════════
+        #
+        # 이 검사는 **연결 끊김 시험보다 먼저** 해야 한다. 그 시험은 일부러 요청을
+        # 끊으므로 브라우저가 당연히 오류를 남기고, 뒤에 두면 이 검사가 늘 실패한다.
         print("\n=== 브라우저 오류 ===")
         real_errors = [e for e in errors if "no sw" not in e and "favicon" not in e]
         check("화면을 쓰는 동안 자바스크립트 오류가 없었다",
               not real_errors, "; ".join(real_errors[:3]) if real_errors else "0건")
+
+        # ══ 서버에 닿지 못할 때 한국어로 알려 주는가 ════════════
+        #
+        # 프로그램이 켜지는 도중이거나 검은 명령 창이 닫히면 화면은 (서비스 워커 덕분에)
+        # 그려지는데 API 요청만 실패한다. 그때 브라우저의 영어 원문 "Failed to fetch" 가
+        # 그대로 뜨면 사용자는 무슨 일인지 전혀 알 수 없다.
+        print("\n=== 연결이 끊겼을 때의 안내 ===")
+
+        page.route("**/api/projects*", lambda route: route.abort())
+        page.goto(BASE + "/", wait_until="domcontentloaded")
+        dismiss_coach(page)
+        page.wait_for_timeout(1200)
+        shown = page.locator("#recent-list").inner_text()
+        check("연결이 끊기면 영어 원문(Failed to fetch)이 그대로 뜨지 않는다",
+              "Failed to fetch" not in shown, shown.strip()[:80])
+        check("무엇을 하면 되는지 한국어로 알려 준다",
+              "명령 창" in shown and "새로고침" in shown, shown.strip()[:80])
+        page.unroute("**/api/projects*")
 
         browser.close()
 finally:

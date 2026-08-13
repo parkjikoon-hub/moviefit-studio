@@ -28,7 +28,17 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // ══ 서버 통신 ══════════════════════════════════════════════
 async function api(path, options = {}) {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  let res;
+  try {
+    res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  } catch (_) {
+    // 서버에 닿지 못하면 브라우저가 "Failed to fetch" 라는 영어 문구를 던진다.
+    // 사용자에게는 아무 뜻도 없는 말이므로 무슨 일이고 무엇을 하면 되는지로 바꾼다.
+    // (프로그램이 켜지는 도중이거나, 검은 명령 창이 닫혔을 때 실제로 나온다)
+    throw new Error(
+      "프로그램과 연결이 끊겼습니다. 검은 명령 창이 켜져 있는지 확인한 뒤 F5로 새로고침해 주세요."
+    );
+  }
   if (!res.ok) {
     let message = `서버 오류 (${res.status})`;
     try { const body = await res.json(); if (body.detail) message = body.detail; } catch (_) {}
