@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app import __version__
 from app.config import MEDIA_EXTS
-from app.core import filedialog
+from app.core import filedialog, framing
 from app.core import projects as store
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -69,6 +69,28 @@ def open_folder(req: OpenFolderRequest) -> dict[str, Any]:
         raise HTTPException(400, "폴더 열기는 윈도우에서만 지원합니다.")
     subprocess.Popen(["explorer", str(target)])
     return {"opened": str(target)}
+
+
+@router.get("/framing")
+def framing_preview(
+    w: int, h: int, aspect: str = "source", fit: str = "crop",
+    focus_x: float = 50.0, focus_y: float = 50.0, pad_blur: bool = True,
+) -> dict[str, Any]:
+    """원본 크기와 설정을 주면 최종 출력 크기·자르는 영역을 돌려준다 (F-C).
+
+    화면(app.js)은 미리보기 틀을 즉시 그려야 해서 같은 계산을 자바스크립트로도 갖고 있다.
+    이 API는 **그 둘이 같은 답을 내는지 점검 스크립트가 대조하기 위한 것**이다.
+    실제 내보내기는 언제나 파이썬 쪽(framing.py) 계산을 쓴다.
+    """
+    if w <= 0 or h <= 0:
+        raise HTTPException(400, "영상 크기는 0보다 커야 합니다.")
+    try:
+        return framing.resolve(w, h, {
+            "aspect": aspect, "fit": fit,
+            "focus_x": focus_x, "focus_y": focus_y, "pad_blur": pad_blur,
+        })
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/info")

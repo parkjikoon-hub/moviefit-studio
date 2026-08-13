@@ -346,6 +346,7 @@ def mix_narration_into_video(
     out_name: str = "나레이션영상.mp4",
     original_volume: int = 30,
     duck: bool = False,
+    output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """영상에 나레이션 오디오를 얹어 새 mp4를 만든다 (F-51).
 
@@ -356,12 +357,14 @@ def mix_narration_into_video(
         out_dir         : 프로젝트의 out/ 폴더
         original_volume : 원본 소리를 몇 %로 줄일지 (0~100). duck=True면 무시된다.
         duck            : True면 고정 감쇠 대신 자동 덕킹(나레이션 말하는 동안만 감쇠)
+        output          : 출력 화면비 설정 (framing 형식). 화면비를 바꾸지 않으면 None과 같다
 
     돌려주는 값:
-        {"path","filename","duration","elapsed","had_audio","ducked","original_volume"}
+        {"path","filename","duration","elapsed","had_audio","ducked","original_volume","framing"}
 
-    화면(비디오)은 손대지 않는다(-c:v copy). 자막 번인과 달리 그림을 다시 그릴 일이
-    없으므로 재인코딩할 이유가 없고, 그래서 몇 배 빠르고 화질 손실도 없다.
+    화면비를 바꾸지 않을 때는 화면(비디오)을 손대지 않는다(-c:v copy). 그림을 다시 그릴
+    일이 없으므로 재인코딩할 이유가 없고, 그래서 몇 배 빠르고 화질 손실도 없다.
+    화면비를 바꿀 때만 어쩔 수 없이 다시 그린다(느려진다).
     """
     report = report or _noop
     _require("ffmpeg")
@@ -387,6 +390,14 @@ def mix_narration_into_video(
 
     had_audio = has_audio_stream(source)
 
+    # 화면비를 바꿔야 하는지 먼저 본다. 바꿀 필요가 없으면 지금까지처럼 화면을 그대로 복사한다.
+    from app.core import framing
+    from app.core.ffmpeg import video_dimensions
+
+    src_w, src_h = video_dimensions(source)
+    frame = framing.resolve(src_w, src_h, output)
+    reframe = bool(frame["filter"])
+
     tmp_path = out_folder / f".{final_path.stem}.tmp{final_path.suffix}"
     tmp_path.unlink(missing_ok=True)
 
@@ -397,24 +408,39 @@ def mix_narration_into_video(
     ]
 
     if had_audio:
-        cmd += ["-filter_complex", _mix_filter(volume_pct, duck), "-map", "0:v", "-map", "[a]"]
+        # 소리를 섞을 때는 filter_complex를 쓰므로 화면 필터도 같은 자리에 함께 넣어야 한다.
+        # (-filter_complex 와 -vf 를 동시에 쓰면 FFmpeg이 거부한다.)
+        graph = _mix_filter(volume_pct, duck)
+        if reframe:
+            graph += f";[0:v]{frame['filter']}[v]"
+        cmd += ["-filter_complex", graph, "-map", "[v]" if reframe else "0:v", "-map", "[a]"]
     else:
         # 원본에 소리 트랙이 없으면 섞을 게 없다. 나레이션이 그대로 영상의 소리가 된다.
         # (여기서 [0:a]를 쓰는 필터를 돌리면 FFmpeg이 영문 오류를 내며 죽는다.)
         cmd += ["-map", "0:v", "-map", "1:a"]
+        if reframe:
+            cmd += ["-vf", frame["filter"]]
         if narration_duration > video_duration:
             # 나레이션이 영상보다 길면 화면 없이 소리만 남는 꼬리가 생긴다. 영상 길이에서 자른다.
             cmd += ["-t", f"{video_duration:.3f}"]
 
+    if reframe:
+        # 화면을 잘라 내려면 그림을 다시 그려야 하므로 재인코딩이 불가피하다.
+        cmd += ["-c:v", "libx264", "-crf", "20", "-preset", "medium", "-pix_fmt", "yuv420p"]
+    else:
+        cmd += ["-c:v", "copy"]  # 화면은 그대로 복사 — 재인코딩 없음 (빠르고 무손실)
+
     cmd += [
-        "-c:v", "copy",          # 화면은 그대로 복사 — 재인코딩 없음 (빠르고 무손실)
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         "-progress", "pipe:1", "-nostats",
         str(tmp_path),
     ]
 
-    verb = "나레이션을 합치고 있습니다" if had_audio else "나레이션을 영상에 넣고 있습니다"
+    if reframe:
+        verb = "화면비를 맞추고 나레이션을 합치고 있습니다"
+    else:
+        verb = "나레이션을 합치고 있습니다" if had_audio else "나레이션을 영상에 넣고 있습니다"
     started = time.monotonic()
     try:
         _run_with_progress(cmd, video_duration, report, verb, base=0.05)
@@ -441,4 +467,7 @@ def mix_narration_into_video(
         "had_audio": had_audio,
         "ducked": bool(duck),
         "original_volume": volume_pct,
+        "width": frame["width"],
+        "height": frame["height"],
+        "framing": {"aspect": frame["aspect"], "fit": frame["fit"], "changed": frame["changed"]},
     }

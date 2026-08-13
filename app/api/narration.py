@@ -117,14 +117,21 @@ def _export_video(
 
     name = re.sub(r'[\\/:*?"<>|,;\[\]\']+', "", data.get("name", "출력")).strip()[:40]
 
+    # 출력 화면비 (F-C). 자막 영상과 같은 설정을 써야 두 결과물의 화면비가 어긋나지 않는다.
+    from app.core import framing
+
+    output = framing.normalize(data.get("output"))
+    tag = "" if output["aspect"] == "source" else f"_{output['aspect'].replace(':', '-')}"
+
     return audio_mix.mix_narration_into_video(
         report,
         video_path=video_path,
         narration_path=narration_path,
         out_dir=pdir / "out",
-        out_name=f"{name}_나레이션영상.mp4",
+        out_name=f"{name}{tag}_나레이션영상.mp4",
         original_volume=original_volume,
         duck=duck,
+        output=output,
     )
 
 

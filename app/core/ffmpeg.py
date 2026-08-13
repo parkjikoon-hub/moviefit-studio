@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from app.core import style_map
+from app.core import framing, style_map
 from app.core.fonts import fonts_dir_for_ffmpeg
 from app.core.jobs import JobCancelled
 
@@ -400,6 +400,7 @@ def burn_subtitles(
     out_name: str = "자막영상.mp4",
     seconds: float | None = None,
     fast: bool = False,
+    output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """영상에 자막을 새겨 넣어 새 mp4를 만든다 (TECH_SPEC 7절 2번, F-50).
 
@@ -410,8 +411,9 @@ def burn_subtitles(
         out_dir  : 프로젝트의 out/ 폴더
         seconds  : 앞부분 몇 초만 만들지 (미리보기용, None이면 전체)
         fast     : True면 화질을 조금 낮추고 빠르게 (미리보기용)
+        output   : 출력 화면비 설정 (framing 형식). None이면 원본 크기 그대로
 
-    돌려주는 값: {"path", "filename", "duration", "elapsed", "width", "height", "ass"}
+    돌려주는 값: {"path", "filename", "duration", "elapsed", "width", "height", "ass", "framing"}
     """
     report = report or _noop
     _require("ffmpeg")
@@ -429,13 +431,18 @@ def burn_subtitles(
 
     from app.core.ffprobe import ProbeError, measure_duration  # 순환 import 방지용 지연 import
 
-    width, height = video_dimensions(source)
+    src_width, src_height = video_dimensions(source)
     try:
         full_duration = measure_duration(source)
     except ProbeError as exc:
         raise RenderError(str(exc)) from exc
 
     target_duration = min(full_duration, float(seconds)) if seconds else full_duration
+
+    # 화면비를 바꾸는 경우, 자막은 **잘라낸 뒤의 크기**를 기준으로 만들어야 한다.
+    # 원본 크기로 만들면 글자 크기와 위치가 전부 어긋난다 (framing.py 첫 부분 설명 참고).
+    frame = framing.resolve(src_width, src_height, output)
+    width, height = frame["width"], frame["height"]
 
     report(0.02, "자막 파일을 만들고 있습니다…")
     # 자막 파일 이름에서 필터 특수문자를 걸러 낸다 (이 이름은 필터 인자로 들어간다)
@@ -451,12 +458,14 @@ def burn_subtitles(
     # fontsdir로 번들 폰트 폴더를 알려 주지 않으면 한글이 네모(□)로 나온다 (R4).
     workdir, ass_arg, fonts_arg = _filter_paths(ass_path)
     subtitle_filter = f"ass={ass_arg}:fontsdir={fonts_arg}"
+    # 자르기가 먼저, 자막이 나중이다. 순서가 반대면 방금 새긴 자막이 잘려 나간다.
+    video_filter = framing.chain(frame["filter"], subtitle_filter)
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(source)]
     if seconds:
         cmd += ["-t", f"{target_duration:.3f}"]
     cmd += [
-        "-vf", subtitle_filter,
+        "-vf", video_filter,
         "-c:v", "libx264",
         "-crf", "23" if fast else "20",
         "-preset", "veryfast" if fast else "medium",
@@ -489,7 +498,10 @@ def burn_subtitles(
         "elapsed": round(elapsed, 2),
         "width": width,
         "height": height,
+        "source_width": src_width,
+        "source_height": src_height,
         "ass": str(ass_path),
+        "framing": {"aspect": frame["aspect"], "fit": frame["fit"], "changed": frame["changed"]},
     }
 
 
@@ -502,11 +514,13 @@ def render_preview(
     out_dir: str | Path,
     seconds: float = 10.0,
     out_name: str = "미리보기.mp4",
+    output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """앞부분 몇 초만 자막을 넣어 빠르게 만들어 본다 (F-54).
 
     몇 분짜리 영상을 다 만들고 나서야 자막이 마음에 안 든다는 걸 알면 시간이 아깝다.
     그래서 앞 10초만 낮은 화질·빠른 설정으로 먼저 확인하게 한다.
+    화면비도 실제 내보내기와 똑같이 적용된다 — 그래야 미리보기의 뜻이 있다.
     """
     return burn_subtitles(
         report,
@@ -517,4 +531,5 @@ def render_preview(
         out_name=out_name,
         seconds=seconds,
         fast=True,
+        output=output,
     )

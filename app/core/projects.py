@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import PROJECTS_DIR
-from app.core import style_map
+from app.core import framing, style_map
 
 PROJECT_FILE = "project.json"
 SCHEMA_VERSION = 1
@@ -60,6 +60,8 @@ def default_project(name: str, video_path: str | None, mode: str) -> dict[str, A
         "script": "",  # 대본 모드 원문
         "segments": [],
         "style": style_map.apply_preset("basic"),
+        # 내보낼 때의 화면비 (롱폼·숏폼). 기본은 원본 그대로라 옛 프로젝트와 동작이 같다.
+        "output": dict(framing.DEFAULT_OUTPUT),
         "narration": {
             "gap": 0.3,
             "voice": "ko-KR-SunHiNeural",

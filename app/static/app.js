@@ -108,27 +108,55 @@ function refreshUndoButtons() {
 }
 
 // ══ 자동 저장 ══════════════════════════════════════════════
+// 편집하면 2초 뒤에 저절로 저장된다. 그 2초를 기다리기 싫으면 [저장됨] 단추를 누른다 (F-D).
+let justSavedTimer = null;
+
+/** 단추에 마우스를 올렸을 때 뜨는 설명. 마지막으로 저장한 시각을 함께 보여 준다. */
+function refreshSaveTip() {
+  const el = $("#save-state");
+  if (!el) return;
+  const when = project && project.updated_at
+    ? `마지막 저장: ${project.updated_at}`
+    : "아직 저장한 적이 없습니다";
+  el.title = `누르면 기다리지 않고 지금 바로 저장합니다\n${when}`;
+}
+
 function markDirty() {
   if (!project) return;
   const state = $("#save-state");
   state.textContent = "저장 중…";
   state.classList.add("is-saving");
+  state.classList.remove("is-just-saved");
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveNow, 2000);
+  saveTimer = setTimeout(() => saveNow(), 2000);
 }
-async function saveNow() {
-  if (!project) return;
+
+/** 지금 즉시 저장한다. flash를 켜면 저장이 끝난 뒤 단추가 잠깐 밝아지고 알림이 뜬다. */
+async function saveNow({ flash = false } = {}) {
+  if (!project) return false;
   const state = $("#save-state");
+  clearTimeout(saveTimer);   // 손으로 눌렀으면 예약해 둔 자동 저장은 필요 없다
+  saveTimer = null;
+  state.textContent = "저장 중…";
+  state.classList.add("is-saving");
   try {
     const saved = await api(`/api/projects/${encodeURIComponent(project.id)}`, {
       method: "PUT", body: JSON.stringify(project),
     });
     project.updated_at = saved.updated_at;
     state.textContent = "저장됨";
-    saveTimer = null;
+    refreshSaveTip();
+    if (flash) {
+      state.classList.add("is-just-saved");
+      clearTimeout(justSavedTimer);
+      justSavedTimer = setTimeout(() => state.classList.remove("is-just-saved"), 1400);
+      toast(`저장했습니다. (${project.updated_at})`);
+    }
+    return true;
   } catch (err) {
     state.textContent = "저장 실패";
     toast(`저장하지 못했습니다: ${err.message}`, { error: true });
+    return false;
   } finally {
     state.classList.remove("is-saving");
   }
@@ -218,7 +246,11 @@ function renderProject() {
   if (!project) return;
   $("#project-name").value = project.name;
   $("#save-state").textContent = "저장됨";
+  refreshSaveTip();
   setMode(project.mode, false);
+
+  // 화면비 설정이 없던 옛 프로젝트도 열리게 한다 (기본값은 '원본 그대로'라 동작이 같다)
+  project.output = normalizeOutput(project.output);
 
   const player = $("#player");
   const box = $("#video-box");
@@ -245,6 +277,8 @@ function renderProject() {
 
   renderStylePanel();
   renderNarrationPanel();
+  syncAspectInputs();
+  applyFrameGuide();   // 영상 크기를 알게 되면 loadedmetadata 에서 한 번 더 그린다
   renderAll();
   refreshUndoButtons();
 }
@@ -1027,6 +1061,34 @@ function syncStyleInputs() {
   $$(".preset").forEach((c) => c.classList.toggle("is-active", c.dataset.key === st.preset));
 }
 
+// 화살표 한 번에 움직이는 양 (화면 대비 %). Shift를 함께 누르면 BIG 쪽을 쓴다.
+const NUDGE_STEP = 1, NUDGE_STEP_BIG = 5;
+const NUDGE_DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+/** 자막을 화살표 방향으로 조금씩 옮긴다 (F-B).
+ *  위치 프리셋(위/가운데/아래)을 쓰고 있었더라도 지금 보이는 자리를 출발점으로 삼아
+ *  custom 으로 넘어간다. 그래야 화면에서 보이던 위치가 갑자기 튀지 않는다. */
+function nudgePosition(dir, big) {
+  if (!project) return;
+  const delta = NUDGE_DIRS[dir];
+  if (!delta) return;
+  const step = big ? NUDGE_STEP_BIG : NUDGE_STEP;
+  const [cx, cy] = resolvedPosition(project.style);
+  // 소수점 한 자리로 맞춘다. 이렇게 하지 않으면 0.1이 쌓여 88.00000000000001 같은 값이 저장된다.
+  const round1 = (v) => Math.round(v * 10) / 10;
+  const x = clamp(round1(cx + delta[0] * step), 0, 100);
+  const y = clamp(round1(cy + delta[1] * step), 0, 100);
+  if (x === round1(cx) && y === round1(cy)) return;  // 이미 가장자리면 되돌림점을 남기지 않는다
+
+  snapshot();
+  project.style.position = {
+    mode: "custom",
+    preset: project.style.position?.preset || "bottom",
+    x, y,
+  };
+  syncStyleInputs(); applyOverlayStyle(); markDirty();
+}
+
 function wireStylePanel() {
   const change = (sel, apply, live = false) => {
     const el = $(sel);
@@ -1083,6 +1145,19 @@ function wireStylePanel() {
       snapshot();
       project.style.position = { mode: "custom", preset: project.style.position?.preset || "bottom", x: key === "x" ? value : cx, y: key === "y" ? value : cy };
       syncStyleInputs(); applyOverlayStyle(); markDirty();
+    });
+  }
+
+  // 화살표 미세 조정 (F-B)
+  $$(".nudge-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => nudgePosition(btn.dataset.nudge, e.shiftKey));
+  });
+  // Shift를 누르고 있는 동안에는 가운데 글자가 5%로 바뀐다 — 몇 %씩 움직일지 눌러 보기 전에 안다
+  for (const [event, big] of [["keydown", true], ["keyup", false]]) {
+    document.addEventListener(event, (e) => {
+      if (e.key !== "Shift") return;
+      const el = $(".nudge-step");
+      if (el) el.textContent = big ? "5%" : "1%";
     });
   }
 
@@ -1345,7 +1420,9 @@ function wireStartScreen() {
 
 // ══ 작업 화면 연결 ═════════════════════════════════════════
 function wireEditor() {
-  $("#btn-home").addEventListener("click", async () => { clearTimeout(saveTimer); await saveNow(); showStart(); });
+  $("#btn-home").addEventListener("click", async () => { await saveNow(); showStart(); });
+  // 상태 글자를 눌러도 저장된다 (F-D). 사용자가 실제로 눌러 보려 했던 자리다.
+  $("#save-state").addEventListener("click", () => saveNow({ flash: true }));
   $("#project-name").addEventListener("input", (e) => { project.name = e.target.value; markDirty(); });
   $("#mode-video").addEventListener("click", () => setMode("video"));
   $("#mode-script").addEventListener("click", () => setMode("script"));
@@ -1415,17 +1492,32 @@ function wireEditor() {
     updateOverlay(player.currentTime);
     updatePlayhead(player.currentTime);
     enforceABLoop(player);
+    // 여백 채우기의 흐린 배경이 본 영상과 같은 장면을 보이도록 따라가게 한다
+    if (currentOutput().fit === "pad" && currentOutput().pad_blur) syncBlurBackground(true);
   });
   player.addEventListener("loadedmetadata", () => {
     $("#time-total").textContent = fmtTime(player.duration);
     applyOverlayStyle(); zoomFit();
+    // 영상 크기를 이제야 알 수 있다. 화면비 틀은 여기서 처음 제대로 그려진다.
+    syncAspectInputs(); applyFrameGuide();
   });
   player.addEventListener("error", () => {
     if (player.getAttribute("src")) toast("영상을 재생할 수 없습니다. 파일이 옮겨졌거나 지원하지 않는 형식일 수 있습니다.", { error: true });
   });
   $("#btn-play").addEventListener("click", () => (player.paused ? player.play() : player.pause()));
-  player.addEventListener("play", () => ($("#btn-play").textContent = "⏸"));
-  player.addEventListener("pause", () => ($("#btn-play").textContent = "▶"));
+  player.addEventListener("play", () => {
+    $("#btn-play").textContent = "⏸";
+    if (currentOutput().fit === "pad" && currentOutput().pad_blur) syncBlurBackground(true);
+  });
+  player.addEventListener("pause", () => {
+    $("#btn-play").textContent = "▶";
+    const bg = $("#player-bg");
+    if (bg && !bg.hidden) bg.pause();
+  });
+  player.addEventListener("seeked", () => {
+    const bg = $("#player-bg");
+    if (bg && !bg.hidden) bg.currentTime = player.currentTime;
+  });
   $("#playback-rate").addEventListener("change", (e) => { player.playbackRate = parseFloat(e.target.value); });
   $("#btn-prev-seg").addEventListener("click", () => stepSegment(-1));
   $("#btn-next-seg").addEventListener("click", () => stepSegment(+1));
@@ -1436,6 +1528,7 @@ function wireEditor() {
   wireExportDialog();
   wireOverlayDrag();
   wireStylePanel();
+  wireAspectPanel();
   wireNarrationPanel();
   wireDictionary();
   wireCoach();
@@ -1471,7 +1564,8 @@ function wireShortcuts() {
     if (e.ctrlKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
     if (e.ctrlKey && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
     if (e.ctrlKey && e.key.toLowerCase() === "f") { e.preventDefault(); $("#seg-search").focus(); return; }
-    if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); clearTimeout(saveTimer); saveNow(); toast("저장했습니다."); return; }
+    // 저장이 끝나기 전에 "저장했습니다"라고 알리면 거짓말이 된다. 단추와 같은 경로를 쓴다.
+    if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveNow({ flash: true }); return; }
 
     if (typing) return;
 
@@ -1611,6 +1705,7 @@ async function reloadProjectFromServer() {
   renderAll();
   refreshUndoButtons();
   $("#save-state").textContent = "저장됨";
+  refreshSaveTip();
 }
 
 /** 나레이션이 영상보다 길면 미리 알려 준다 (잘림 사고 예방). */
@@ -1668,6 +1763,25 @@ async function openExportDialog() {
       warnBox.hidden = false;
     }
   } catch (_) { /* 경고를 못 받아도 내보내기 자체는 막지 않는다 */ }
+
+  // 화면비를 바꿔 두었으면 어떤 크기로 나가는지 내보내기 직전에 한 번 더 알린다.
+  // 설정 화면을 떠난 뒤 한참 있다 내보내는 경우가 많아 여기서 다시 보여 줘야 한다.
+  const conf = currentOutput();
+  const dims = sourceDimensions();
+  const note = $("#export-aspect-note");
+  if (note) {
+    if (conf.aspect === "source" || !dims) {
+      note.hidden = true;
+    } else {
+      const frame = resolveFraming(dims.w, dims.h, conf);
+      const how = frame.fit === "pad"
+        ? `원본 전체를 넣고 남는 곳은 ${conf.pad_blur ? "흐린 배경" : "검은색"}으로 채웁니다`
+        : "가장자리를 잘라 냅니다";
+      note.textContent =
+        `영상은 ${FR_ASPECT_LABELS[conf.aspect]} · ${frame.width}×${frame.height} 로 나갑니다 — ${how}.`;
+      note.hidden = false;
+    }
+  }
 
   const hasSegments = segments().length > 0;
   const hasVideo = !!project.video_path;
@@ -2086,7 +2200,325 @@ function enforceABLoop(player) {
   }
 }
 
-// ══ 세로 영상(쇼츠) 프리셋 ═════════════════════════════════
+// ══ 출력 화면비 — 롱폼·숏폼 (F-A, F-C) ═════════════════════
+//
+// 아래 계산은 서버의 app/core/framing.py 와 **똑같은 답**을 내야 한다. 미리보기 틀은
+// 마우스를 끄는 동안 즉시 다시 그려야 해서 서버에 물어볼 수 없기 때문에 같은 규칙을
+// 여기에도 둔다. 두 곳이 어긋나지 않는지는 tests/phase4_test.py 가 실제로 대조한다.
+
+const FR_ASPECTS = { "16:9": [16, 9], "9:16": [9, 16], "1:1": [1, 1] };
+const FR_ASPECT_LABELS = {
+  source: "원본 그대로", "16:9": "가로 16:9", "9:16": "세로 9:16", "1:1": "정사각 1:1",
+};
+const FR_DEFAULT = { aspect: "source", fit: "crop", focus_x: 50, focus_y: 50, pad_blur: true };
+
+// 0.5는 언제나 위로. 파이썬 쪽 _round() 와 같은 규칙이다 (파이썬 기본 round는 다르게 동작한다).
+const frRound = (v) => Math.floor(v + 0.5);
+const frEven = (v) => { const n = frRound(v); return Math.max(2, n - (n % 2)); };
+
+function normalizeOutput(output) {
+  const src = Object.assign({}, FR_DEFAULT, output || {});
+  let aspect = String(src.aspect || "source");
+  if (aspect !== "source" && !(aspect in FR_ASPECTS)) aspect = "source";
+  let fit = String(src.fit || "crop");
+  if (fit !== "crop" && fit !== "pad") fit = "crop";
+  const pct = (v) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? Math.round(clamp(n, 0, 100) * 100) / 100 : 50;
+  };
+  return {
+    aspect, fit,
+    focus_x: pct(src.focus_x), focus_y: pct(src.focus_y),
+    pad_blur: src.pad_blur !== false,
+  };
+}
+
+/** 원본 크기와 설정으로 최종 출력 크기와 잘라낼 영역을 구한다 (framing.resolve 와 같은 계산). */
+function resolveFraming(srcWidth, srcHeight, output) {
+  const conf = normalizeOutput(output);
+  const srcW = Math.trunc(srcWidth), srcH = Math.trunc(srcHeight);
+  if (!(srcW > 0) || !(srcH > 0)) throw new Error("원본 영상 크기가 올바르지 않습니다.");
+
+  if (conf.aspect === "source") {
+    return { width: frEven(srcW), height: frEven(srcH), changed: false,
+             aspect: "source", fit: conf.fit, crop: null };
+  }
+
+  const [rw, rh] = FR_ASPECTS[conf.aspect];
+  const targetRatio = rw / rh;
+  const sourceRatio = srcW / srcH;
+
+  if (conf.fit === "crop") {
+    let cropW, cropH;
+    if (sourceRatio > targetRatio) { cropH = srcH; cropW = srcH * targetRatio; }
+    else { cropW = srcW; cropH = srcW / targetRatio; }
+
+    const outW = frEven(cropW), outH = frEven(cropH);
+    let offX = frRound((srcW - outW) * conf.focus_x / 100);
+    let offY = frRound((srcH - outH) * conf.focus_y / 100);
+    offX = clamp(offX, 0, Math.max(0, srcW - outW));
+    offY = clamp(offY, 0, Math.max(0, srcH - outH));
+
+    const changed = outW !== frEven(srcW) || outH !== frEven(srcH);
+    return { width: outW, height: outH, changed,
+             aspect: conf.aspect, fit: "crop",
+             crop: { x: offX, y: offY, w: outW, h: outH } };
+  }
+
+  // 여백 채우기 — 원본의 긴 변을 새 틀의 긴 변으로 삼는다 (framing.py 의 설명 참고)
+  const longSide = Math.max(srcW, srcH);
+  let outW, outH;
+  if (targetRatio >= 1) { outW = frEven(longSide); outH = frEven(longSide / targetRatio); }
+  else { outH = frEven(longSide); outW = frEven(longSide * targetRatio); }
+
+  const changed = outW !== frEven(srcW) || outH !== frEven(srcH);
+  return { width: outW, height: outH, changed, aspect: conf.aspect, fit: "pad", crop: null };
+}
+
+/** 프로젝트에 저장된 화면비 설정 (없으면 기본값). */
+function currentOutput() {
+  return normalizeOutput(project && project.output);
+}
+
+/** 지금 열려 있는 영상의 실제 픽셀 크기. 아직 못 읽었으면 null. */
+function sourceDimensions() {
+  const p = $("#player");
+  if (!p || !p.videoWidth || !p.videoHeight) return null;
+  return { w: p.videoWidth, h: p.videoHeight };
+}
+
+/** 미리보기 위의 화면비 틀을 지금 설정대로 다시 그린다 (F-C ⓐ). */
+function applyFrameGuide() {
+  const guide = $("#frame-guide");
+  const win = $("#fg-window");
+  const box = $("#video-box");
+  const bg = $("#player-bg");
+  if (!guide || !win || !box) return;
+
+  const conf = currentOutput();
+  const dims = sourceDimensions();
+
+  // 원본 그대로이거나 영상 크기를 아직 모르면 아무것도 겹치지 않는다
+  if (conf.aspect === "source" || !dims) {
+    guide.hidden = true;
+    box.classList.remove("is-padded", "is-pad-black");
+    box.style.removeProperty("--out-ar");
+    if (bg) { bg.hidden = true; bg.removeAttribute("src"); }
+    updateAspectReadout(null);
+    return;
+  }
+
+  const frame = resolveFraming(dims.w, dims.h, conf);
+
+  if (frame.fit === "pad") {
+    // 여백 채우기: 상자 자체를 목표 화면비로 만들고 영상을 그 안에 담는다.
+    // 잘리는 것이 없으므로 어둡게 덮지 않고 테두리만 두른다.
+    box.classList.add("is-padded");
+    box.classList.toggle("is-pad-black", !conf.pad_blur);
+    box.style.setProperty("--out-ar", `${frame.width} / ${frame.height}`);
+    guide.hidden = false;
+    win.style.left = "0"; win.style.top = "0";
+    win.style.width = "100%"; win.style.height = "100%";
+    win.style.boxShadow = "none";
+    win.classList.add("is-fixed");
+    syncBlurBackground(conf.pad_blur);
+  } else {
+    box.classList.remove("is-padded", "is-pad-black");
+    box.style.removeProperty("--out-ar");
+    syncBlurBackground(false);
+
+    guide.hidden = false;
+    win.style.boxShadow = "";  // CSS 기본값(바깥을 어둡게)으로 되돌린다
+    win.style.left = `${frame.crop.x / dims.w * 100}%`;
+    win.style.top = `${frame.crop.y / dims.h * 100}%`;
+    win.style.width = `${frame.crop.w / dims.w * 100}%`;
+    win.style.height = `${frame.crop.h / dims.h * 100}%`;
+    // 남는 여유가 없으면(예: 정확히 들어맞는 화면비) 끌 것이 없다
+    const slack = (dims.w - frame.crop.w) > 0 || (dims.h - frame.crop.h) > 0;
+    win.classList.toggle("is-fixed", !slack);
+  }
+
+  updateAspectReadout({ frame, dims, conf });
+}
+
+/** 여백 채우기의 흐린 배경 영상을 본 영상과 같은 지점으로 맞춘다. */
+function syncBlurBackground(on) {
+  const bg = $("#player-bg");
+  const p = $("#player");
+  if (!bg || !p) return;
+  if (!on || !p.src) {
+    bg.hidden = true;
+    if (bg.src) { bg.removeAttribute("src"); bg.load(); }
+    return;
+  }
+  if (bg.getAttribute("src") !== p.getAttribute("src")) {
+    bg.src = p.getAttribute("src");
+  }
+  bg.hidden = false;
+  // 0.3초 넘게 벌어졌을 때만 맞춘다. 매번 맞추면 재생이 튄다.
+  if (Math.abs((bg.currentTime || 0) - p.currentTime) > 0.3) bg.currentTime = p.currentTime;
+  if (p.paused) { bg.pause(); } else if (bg.paused) { bg.play().catch(() => {}); }
+}
+
+/** 화면비 설정 아래에 "무엇이 어떻게 되는지"를 글로 적어 준다. */
+function updateAspectReadout(info) {
+  const el = $("#aspect-readout");
+  if (!el) return;
+  if (!info) {
+    const dims = sourceDimensions();
+    el.textContent = dims
+      ? `원본 ${dims.w}×${dims.h} 그대로 내보냅니다.`
+      : "영상을 불러오면 결과 크기를 알려 드립니다.";
+    return;
+  }
+  const { frame, dims, conf } = info;
+  const size = `${dims.w}×${dims.h} → ${frame.width}×${frame.height}`;
+  if (frame.fit === "pad") {
+    const filler = conf.pad_blur ? "흐린 배경" : "검은색";
+    el.textContent = `${size} · 원본 전체가 들어가고 남는 곳은 ${filler}으로 채웁니다. 잘리는 부분이 없습니다.`;
+  } else {
+    const cutW = dims.w - frame.crop.w, cutH = dims.h - frame.crop.h;
+    const cut = cutW > 0
+      ? `좌우에서 ${cutW}픽셀`
+      : (cutH > 0 ? `위아래에서 ${cutH}픽셀` : "잘리는 부분 없이");
+    el.textContent = `${size} · ${cut} 잘라 냅니다. 남길 자리는 아래 막대나 미리보기 틀로 옮길 수 있습니다.`;
+  }
+}
+
+/** 화면비 설정을 바꾸고 저장한다. */
+function setOutput(patch, { snap = true } = {}) {
+  if (!project) return;
+  if (snap) snapshot();
+  project.output = normalizeOutput(Object.assign({}, currentOutput(), patch));
+  syncAspectInputs();
+  applyFrameGuide();
+  applyOverlayStyle();
+  markDirty();
+}
+
+/** 화면비 관련 입력칸·단추를 지금 설정에 맞춘다. */
+function syncAspectInputs() {
+  const conf = currentOutput();
+  $$(".aspect-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.aspect === conf.aspect));
+  $$(".fit-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.fit === conf.fit));
+
+  const opts = $("#aspect-options");
+  if (opts) opts.hidden = conf.aspect === "source";
+
+  const cropOpts = $("#crop-options"), padOpts = $("#pad-options");
+  if (cropOpts) cropOpts.hidden = conf.fit !== "crop";
+  if (padOpts) padOpts.hidden = conf.fit !== "pad";
+
+  // 잘라낼 자리 막대는 여유가 있는 축을 조절한다 (가로로 넓으면 좌우, 세로로 길면 위아래)
+  const dims = sourceDimensions();
+  const slider = $("#aspect-focus");
+  if (slider && dims) {
+    const frame = resolveFraming(dims.w, dims.h, conf);
+    const vertical = frame.fit === "crop" && frame.crop && (dims.h - frame.crop.h) > 0;
+    slider.value = String(vertical ? conf.focus_y : conf.focus_x);
+    const label = $("#focus-val");
+    if (label) {
+      const v = Number(slider.value);
+      const words = vertical
+        ? (v <= 15 ? "위쪽" : v >= 85 ? "아래쪽" : v === 50 ? "가운데" : `위에서 ${v}%`)
+        : (v <= 15 ? "왼쪽" : v >= 85 ? "오른쪽" : v === 50 ? "가운데" : `왼쪽에서 ${v}%`);
+      label.textContent = words;
+    }
+  }
+  const blur = $("#aspect-pad-blur");
+  if (blur) blur.checked = conf.pad_blur;
+}
+
+/** 지금 화면비에서 잘라낼 자리를 조절하는 축이 세로인지. */
+function focusAxisIsVertical() {
+  const dims = sourceDimensions();
+  if (!dims) return false;
+  const frame = resolveFraming(dims.w, dims.h, currentOutput());
+  return frame.fit === "crop" && !!frame.crop && (dims.h - frame.crop.h) > 0;
+}
+
+function wireAspectPanel() {
+  $$(".aspect-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const aspect = btn.dataset.aspect;
+      setOutput({ aspect });
+      toast(`화면비를 ${FR_ASPECT_LABELS[aspect]}(으)로 바꿨습니다.`);
+    });
+  });
+
+  $$(".fit-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setOutput({ fit: btn.dataset.fit }));
+  });
+
+  const slider = $("#aspect-focus");
+  if (slider) {
+    // 끄는 동안에는 되돌림점을 만들지 않는다. 한 번 끌 때마다 Ctrl+Z가 백 번 필요해진다.
+    slider.addEventListener("input", () => {
+      const v = clamp(parseFloat(slider.value) || 0, 0, 100);
+      setOutput(focusAxisIsVertical() ? { focus_y: v } : { focus_x: v }, { snap: false });
+    });
+    slider.addEventListener("change", () => snapshot());
+  }
+
+  const blur = $("#aspect-pad-blur");
+  if (blur) blur.addEventListener("change", () => setOutput({ pad_blur: blur.checked }));
+
+  wireFrameDrag();
+}
+
+/** 미리보기 틀을 마우스로 끌어 잘라낼 자리를 옮긴다 (F-C ⓑ 의 위치 지정). */
+function wireFrameDrag() {
+  const win = $("#fg-window");
+  if (!win) return;
+  let drag = null;
+
+  win.addEventListener("pointerdown", (e) => {
+    if (win.classList.contains("is-fixed")) return;
+    const dims = sourceDimensions();
+    if (!dims) return;
+    const frame = resolveFraming(dims.w, dims.h, currentOutput());
+    if (!frame.crop) return;
+
+    const rect = $("#video-box").getBoundingClientRect();
+    drag = {
+      startX: e.clientX, startY: e.clientY,
+      conf: currentOutput(),
+      // 화면에 그려진 1픽셀이 원본 몇 픽셀인지
+      scaleX: dims.w / rect.width, scaleY: dims.h / rect.height,
+      slackX: dims.w - frame.crop.w, slackY: dims.h - frame.crop.h,
+    };
+    snapshot();
+    win.setPointerCapture(e.pointerId);
+    win.classList.add("is-dragging");
+    e.preventDefault();
+  });
+
+  win.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const patch = {};
+    if (drag.slackX > 0) {
+      const moved = (e.clientX - drag.startX) * drag.scaleX;
+      patch.focus_x = clamp(drag.conf.focus_x + (moved / drag.slackX) * 100, 0, 100);
+    }
+    if (drag.slackY > 0) {
+      const moved = (e.clientY - drag.startY) * drag.scaleY;
+      patch.focus_y = clamp(drag.conf.focus_y + (moved / drag.slackY) * 100, 0, 100);
+    }
+    setOutput(patch, { snap: false });
+  });
+
+  for (const ev of ["pointerup", "pointercancel"]) {
+    win.addEventListener(ev, (e) => {
+      if (!drag) return;
+      drag = null;
+      win.classList.remove("is-dragging");
+      try { win.releasePointerCapture(e.pointerId); } catch { /* 이미 놓였으면 무시 */ }
+    });
+  }
+}
+
+// ══ 세로 영상(쇼츠) 자막 프리셋 ════════════════════════════
+// 화면비 자체는 위의 [세로 9:16] 단추가 바꾼다. 이 단추는 **자막 모양**만 세로에 맞춘다.
 function applyShortsPreset() {
   snapshot();
   // 쇼츠는 화면 위아래를 앱 UI가 가리므로 자막을 가운데 아래쪽 안전한 자리에 둔다

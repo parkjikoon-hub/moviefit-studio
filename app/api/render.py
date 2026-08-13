@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core import ffmpeg, jobs, stt, style_map, subtitles
+from app.core import ffmpeg, framing, jobs, stt, style_map, subtitles
 from app.core import projects as store
 
 router = APIRouter(prefix="/api/projects", tags=["render"])
@@ -120,9 +120,13 @@ def _export_video(report, *, project_id: str, preview: bool, seconds: int) -> di
         raise RuntimeError("원본 영상 파일을 찾을 수 없습니다. 옮기거나 지우셨나요?")
 
     style = style_map.normalize(data.get("style"))
+    # 출력 화면비 (F-C). 파일 이름에도 남겨서 가로본과 세로본을 눈으로 구별할 수 있게 한다.
+    output = framing.normalize(data.get("output"))
+    tag = "" if output["aspect"] == "source" else f"_{output['aspect'].replace(':', '-')}"
+
     out_dir = store.project_dir(project_id) / "out"
     base = _safe_name(data)
-    out_name = f"{base}_미리보기.mp4" if preview else f"{base}_자막.mp4"
+    out_name = f"{base}{tag}_미리보기.mp4" if preview else f"{base}{tag}_자막.mp4"
 
     if preview:
         return ffmpeg.render_preview(
@@ -133,6 +137,7 @@ def _export_video(report, *, project_id: str, preview: bool, seconds: int) -> di
             out_dir=out_dir,
             out_name=out_name,
             seconds=seconds,
+            output=output,
         )
     return ffmpeg.burn_subtitles(
         report,
@@ -141,6 +146,7 @@ def _export_video(report, *, project_id: str, preview: bool, seconds: int) -> di
         style=style,
         out_dir=out_dir,
         out_name=out_name,
+        output=output,
     )
 
 

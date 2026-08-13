@@ -23,7 +23,11 @@ sys.path.insert(0, str(ROOT))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = "http://127.0.0.1:8765"
+import os  # 점검할 서버 주소를 환경변수로 바꿀 수 있게 한다
+
+# 설치본이 8765를 쓰고 있으면 개발 서버를 다른 포트로 띄우고 여기로 겨냥한다.
+#   예)  set MOVIEFIT_TEST_URL=http://127.0.0.1:8766
+BASE = os.environ.get("MOVIEFIT_TEST_URL", "http://127.0.0.1:8765").rstrip("/")
 SAMPLE_VIDEO = ROOT / "tests" / "sample" / "sample_10s.mp4"
 NARR_DIR = ROOT / "tests" / "sample" / "narration"
 

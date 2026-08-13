@@ -67,7 +67,10 @@
       <button id="mode-script" class="mode-btn" role="tab">대본 모드</button>
     </div>
     <div class="tb-right">
-      <span id="save-state" class="save-state">저장됨</span>
+      <!-- 상태 표시이면서 단추다. 사용자가 실제로 눌러 보려 했으므로 누르면 즉시 저장한다
+           (자동 저장은 2초 뒤에 도는데, 지금 저장됐는지 확인하고 싶을 때가 있다) -->
+      <button id="save-state" class="save-state" type="button"
+              title="누르면 기다리지 않고 지금 바로 저장합니다">저장됨</button>
       <button id="btn-export" class="btn btn-primary">내보내기</button>
     </div>
   </header>
@@ -144,6 +147,9 @@
     <section class="stage">
       <div class="video-wrap">
         <div id="video-box" class="video-box">
+          <!-- 여백 채우기일 때 뒤에 깔리는 흐린 배경. 실제 내보내기와 같은 그림이 보이도록
+               같은 영상을 소리 없이 함께 재생한다. 화면비를 바꾸지 않으면 아예 감춰진다. -->
+          <video id="player-bg" class="player-bg" muted playsinline aria-hidden="true" hidden></video>
           <video id="player" preload="metadata"></video>
           <div id="no-video" class="no-video">영상이 없는 프로젝트입니다 (대본 모드)</div>
 
@@ -153,6 +159,14 @@
 
           <!-- 안전 영역 안내선 (쇼츠 UI에 가려지는 부분) -->
           <div id="safe-area" class="safe-area" hidden></div>
+
+          <!-- 출력 화면비 미리보기 틀 (F-C ⓐ). 밝은 틀 안이 실제로 저장되는 범위이고,
+               바깥의 어두운 곳은 잘려 나간다. 틀은 마우스로 끌어 옮길 수 있다. -->
+          <div id="frame-guide" class="frame-guide" hidden>
+            <div id="fg-window" class="fg-window" role="button" tabindex="0"
+                 title="끌어서 잘라낼 자리를 옮길 수 있습니다"></div>
+          </div>
+
           <div id="drag-readout" class="drag-readout" hidden></div>
         </div>
       </div>
@@ -203,9 +217,54 @@
                  title="지금 화면의 자막 모양(글꼴·색·위치 등)을 이름을 붙여 저장합니다">
           <button id="btn-save-preset" class="btn">저장</button>
         </div>
+          </div>
+        </div>
+
+        <!-- 출력 화면비 — 롱폼·숏폼 (F-A, F-C) -->
+        <div class="grp"><h3>화면비 (롱폼 · 숏폼)</h3>
+          <div class="grp-body">
+        <div class="aspect-grid" role="group" aria-label="출력 화면비">
+          <button class="aspect-btn" data-aspect="source" title="원본 영상의 화면비를 그대로 씁니다">
+            <span class="ab-box ab-source"></span><span class="ab-label">원본 그대로</span>
+          </button>
+          <button class="aspect-btn" data-aspect="16:9" title="유튜브 롱폼·PC 화면에 쓰는 가로 화면입니다">
+            <span class="ab-box ab-169"></span><span class="ab-label">가로 16:9</span>
+          </button>
+          <button class="aspect-btn" data-aspect="9:16" title="쇼츠·릴스·틱톡에 쓰는 세로 화면입니다">
+            <span class="ab-box ab-916"></span><span class="ab-label">세로 9:16</span>
+          </button>
+          <button class="aspect-btn" data-aspect="1:1" title="인스타그램 피드에 쓰는 정사각 화면입니다">
+            <span class="ab-box ab-11"></span><span class="ab-label">정사각 1:1</span>
+          </button>
+        </div>
+
+        <!-- 화면비를 바꿀 때만 의미가 있는 설정들 -->
+        <div id="aspect-options" hidden>
+          <div class="fit-row" role="group" aria-label="화면 밖으로 나가는 부분 처리">
+            <button class="fit-btn" data-fit="crop"
+                    title="목표 화면비에 맞게 가장자리를 잘라 냅니다. 여백이 없어 깔끔하지만 잘린 부분은 사라집니다">잘라내기</button>
+            <button class="fit-btn" data-fit="pad"
+                    title="원본 전체를 넣고 남는 곳을 채웁니다. 아무것도 잘리지 않지만 가운데 영상이 작아집니다">여백 채우기</button>
+          </div>
+
+          <div id="crop-options">
+            <label class="field">잘라낼 자리 <span id="focus-val" class="val">가운데</span>
+              <input id="aspect-focus" type="range" min="0" max="100" step="1" value="50">
+            </label>
+            <p class="hint">미리보기 화면의 <b>밝은 틀을 마우스로 끌어서</b> 옮길 수도 있습니다.</p>
+          </div>
+
+          <div id="pad-options" hidden>
+            <label class="chk"><input type="checkbox" id="aspect-pad-blur" checked> 여백을 흐린 배경으로 채우기</label>
+            <p class="hint">끄면 검은색으로 채웁니다.</p>
+          </div>
+
+          <div id="aspect-readout" class="aspect-readout">—</div>
+        </div>
+
         <button id="btn-shorts" class="btn btn-tiny btn-wide"
                 title="세로 화면에 맞게 자막 크기·줄바꿈·위치를 한 번에 맞춥니다">
-          📱 세로 영상(쇼츠·릴스)용으로 맞추기
+          📱 자막도 세로 화면에 맞게 한 번에 맞추기
         </button>
           </div>
         </div>
@@ -278,7 +337,19 @@
           <button class="pos-btn" data-pos="middle">가운데</button>
           <button class="pos-btn" data-pos="bottom">아래</button>
         </div>
-        <p class="hint">플레이어의 자막을 <b>마우스로 끌면</b> 원하는 자리에 놓을 수 있습니다.</p>
+
+        <!-- 화살표 미세 조정 (F-B). 마우스로 끄는 것보다 정확하고, 손이 떨려도 어긋나지 않는다. -->
+        <div class="pos-nudge" role="group" aria-label="자막 위치 미세 조정">
+          <button class="nudge-btn" data-nudge="up"    aria-label="자막을 위로" title="자막을 위로 옮깁니다 (Shift와 함께 누르면 5%씩)">↑</button>
+          <button class="nudge-btn" data-nudge="left"  aria-label="자막을 왼쪽으로" title="자막을 왼쪽으로 옮깁니다 (Shift와 함께 누르면 5%씩)">←</button>
+          <span class="nudge-step" aria-hidden="true">1%</span>
+          <button class="nudge-btn" data-nudge="right" aria-label="자막을 오른쪽으로" title="자막을 오른쪽으로 옮깁니다 (Shift와 함께 누르면 5%씩)">→</button>
+          <button class="nudge-btn" data-nudge="down"  aria-label="자막을 아래로" title="자막을 아래로 옮깁니다 (Shift와 함께 누르면 5%씩)">↓</button>
+        </div>
+
+        <p class="hint">화살표를 누르면 한 번에 <b>1%</b>씩 움직입니다.
+          <span class="kbd">Shift</span>와 함께 누르면 <b>5%</b>씩 크게 움직입니다.
+          플레이어의 자막을 <b>마우스로 끌어서</b> 옮길 수도 있습니다.</p>
         <div class="row-2">
           <label class="field">가로 % <input id="style-pos-x" type="number" min="0" max="100" step="0.5"></label>
           <label class="field">세로 % <input id="style-pos-y" type="number" min="0" max="100" step="0.5"></label>
@@ -488,6 +559,8 @@
   <div class="coach-card">
     <h3>무엇으로 내보낼까요?</h3>
     <div id="export-warning" class="narr-status is-warn" hidden></div>
+    <!-- 화면비를 바꿔 두었을 때만 보인다 (F-C) -->
+    <div id="export-aspect-note" class="aspect-readout" hidden></div>
     <ul class="export-list">
       <li>
         <button class="export-opt" data-kind="srt">
