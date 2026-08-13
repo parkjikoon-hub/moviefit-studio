@@ -367,6 +367,37 @@ try:
         check("새로고침 후에도 세로 단추에 표시가 켜져 있다",
               "is-active" in page.locator('[data-aspect="9:16"]').get_attribute("class"))
 
+        # ══ 사용설명서로 가는 길이 실제로 눌리는가 ══════════════
+        #
+        # `id`·`href` 가 HTML에 있는지만 보면, 그 단추가 다른 것에 가려져 있거나
+        # 숨겨져 있어도 통과한다. 실제로 눌러서 새 탭이 열리는 것까지 봐야 한다.
+        print("\n=== 사용설명서 열기 ===")
+
+        top = page.locator("#link-guide-top")
+        check("작업 화면의 [?] 단추가 눈에 보인다", top.is_visible())
+        with page.context.expect_page() as tab_event:
+            top.click()
+        guide_tab = tab_event.value
+        guide_tab.wait_for_load_state()
+        check("[?] 를 누르니 새 탭에서 설명서가 열렸다",
+              guide_tab.url.endswith("/guide.html"), guide_tab.url)
+        check("설명서 본문이 실제로 그려졌다",
+              len(guide_tab.locator("main.guide").inner_text()) > 5000,
+              f"{len(guide_tab.locator('main.guide').inner_text()):,}자")
+        check("설명서에 화면비 장이 보인다",
+              guide_tab.locator("h2#aspect").is_visible())
+        # 목차를 눌러 그 자리로 실제로 이동하는가
+        guide_tab.locator('nav.toc a[href="#aspect"]').click()
+        guide_tab.wait_for_timeout(300)
+        check("목차의 고리를 누르니 그 장으로 이동했다",
+              guide_tab.evaluate(
+                  "Math.abs(document.querySelector('h2#aspect').getBoundingClientRect().top) < 200"))
+        # 설명서 색이 프로그램 화면과 같은가 (복사된 옛 색이 남아 있는지)
+        guide_bg = guide_tab.evaluate("getComputedStyle(document.body).backgroundColor")
+        app_bg = page.evaluate("getComputedStyle(document.body).backgroundColor")
+        check("설명서 바탕색이 프로그램 화면과 같다", guide_bg == app_bg, f"{guide_bg} vs {app_bg}")
+        guide_tab.close()
+
         # ══ 자바스크립트 오류가 없었는가 ════════════════════════
         print("\n=== 브라우저 오류 ===")
         real_errors = [e for e in errors if "no sw" not in e and "favicon" not in e]
