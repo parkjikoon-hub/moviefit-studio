@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app import __version__
-from app.config import MEDIA_EXTS
+from app.config import AUDIO_EXTS, IMAGE_EXTS, MEDIA_EXTS
 from app.core import filedialog, framing
 from app.core import projects as store
 
@@ -21,30 +21,57 @@ router = APIRouter(prefix="/api/system", tags=["system"])
 SUBTITLE_EXTS = {".srt", ".vtt", ".ass", ".ssa"}
 
 
+# 각 갈래가 허용하는 확장자. 파일 선택 창의 필터는 "모든 파일"로 빠져나갈 수 있으므로
+# 여기서 한 번 더 거른다 (시스템 경계 검증).
+_ALLOWED_EXTS = {
+    "media": MEDIA_EXTS,
+    "subtitle": SUBTITLE_EXTS,
+    "audio": AUDIO_EXTS,
+    "images": IMAGE_EXTS,
+}
+
+
 @router.post("/pick-file")
 def pick_file(kind: str = "media") -> dict[str, Any]:
     """윈도우 기본 파일 선택 창을 띄워 파일 경로를 받아온다.
 
-    kind="media"면 영상·오디오, kind="subtitle"이면 자막 파일을 고르게 한다.
+    kind="media"면 영상·오디오, "subtitle"이면 자막, "audio"면 음원,
+    "images"면 사진을 **여러 장** 고르게 한다.
+
+    돌려주는 값에는 언제나 `paths`(목록)가 들어 있고, 한 개짜리 갈래는 기존
+    화면 코드가 그대로 쓰도록 `path`·`name`·`size`도 함께 넣는다.
     """
-    if kind not in ("media", "subtitle"):
-        raise HTTPException(400, "kind는 media 또는 subtitle이어야 합니다.")
+    allowed_exts = _ALLOWED_EXTS.get(kind)
+    if allowed_exts is None:
+        raise HTTPException(400, "kind는 media · subtitle · audio · images 중 하나여야 합니다.")
 
     try:
-        path = filedialog.ask_media_file(kind=kind)
+        picked = filedialog.ask_files(kind=kind)
     except filedialog.FileDialogUnavailable as exc:
         raise HTTPException(500, str(exc)) from exc
 
-    if not path:
-        return {"path": None, "cancelled": True}
+    if not picked:
+        return {"path": None, "paths": [], "cancelled": True}
 
-    p = Path(path)
-    allowed_exts = SUBTITLE_EXTS if kind == "subtitle" else MEDIA_EXTS
-    if p.suffix.lower() not in allowed_exts:
-        allowed = ", ".join(sorted(allowed_exts))
-        raise HTTPException(400, f"지원하지 않는 형식입니다. 가능한 확장자: {allowed}")
+    items = []
+    for raw in picked:
+        p = Path(raw)
+        if p.suffix.lower() not in allowed_exts:
+            allowed = ", ".join(sorted(allowed_exts))
+            raise HTTPException(
+                400, f"지원하지 않는 형식입니다 ({p.name}). 가능한 확장자: {allowed}"
+            )
+        items.append({"path": str(p), "name": p.name, "size": p.stat().st_size})
 
-    return {"path": str(p), "name": p.name, "size": p.stat().st_size, "cancelled": False}
+    first = items[0]
+    return {
+        "paths": [it["path"] for it in items],
+        "items": items,
+        "path": first["path"],
+        "name": first["name"],
+        "size": first["size"],
+        "cancelled": False,
+    }
 
 
 class OpenFolderRequest(BaseModel):

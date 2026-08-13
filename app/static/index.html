@@ -22,10 +22,32 @@
       <p class="sub">영상 자막을 자동으로 만들고, 대본으로 나레이션까지 —<br>내 컴퓨터 안에서만 처리됩니다.</p>
     </header>
 
-    <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="영상 파일 선택">
-      <div class="drop-icon">＋</div>
-      <div class="drop-title">영상 파일 선택하기</div>
-      <div class="drop-desc">mp4 · mov · mkv · webm · mp3 · wav · m4a</div>
+    <!-- 진입점 4개를 한 줄에 나란히 둔다.
+         시작 화면은 사용자가 "내가 무엇을 가졌는지"를 확실히 아는 유일한 지점이다
+         ("나는 사진 40장이 있다"). 여기서 숨기면 일단 영상 상자를 눌러 보고 막힌다.
+         끌어다 놓기는 브라우저가 파일의 실제 위치를 알려주지 않아 동작하지 않으므로,
+         문구를 "눌러서"로 써서 헛기대를 만들지 않는다. -->
+    <div class="start-cards">
+      <div id="drop-zone" class="start-card" tabindex="0" role="button" aria-label="영상으로 시작">
+        <div class="card-mark">▶</div>
+        <div class="card-title">영상으로 시작</div>
+        <div class="card-desc">눌러서 영상 1개 고르기<br>mp4 · mov · mkv · webm</div>
+      </div>
+      <div id="card-images" class="start-card" tabindex="0" role="button" aria-label="사진으로 시작">
+        <div class="card-mark">▧</div>
+        <div class="card-title">사진으로 시작</div>
+        <div class="card-desc">눌러서 사진 여러 장 고르기<br>jpg · png · webp</div>
+      </div>
+      <div id="card-audio" class="start-card" tabindex="0" role="button" aria-label="음원으로 시작">
+        <div class="card-mark">♪</div>
+        <div class="card-title">음원으로 시작</div>
+        <div class="card-desc">눌러서 음원 1개 고르기<br>mp3 · wav · m4a</div>
+      </div>
+      <div id="btn-start-script" class="start-card" tabindex="0" role="button" aria-label="대본으로 시작">
+        <div class="card-mark">✎</div>
+        <div class="card-title">대본으로 시작</div>
+        <div class="card-desc">고를 파일 없이 시작<br>나레이션 만들기</div>
+      </div>
     </div>
 
     <details class="path-fallback">
@@ -35,9 +57,6 @@
         <button id="btn-manual-open" class="btn">열기</button>
       </div>
     </details>
-
-    <div class="or-line"><span>또는</span></div>
-    <button id="btn-start-script" class="btn btn-ghost btn-wide">대본으로 시작하기 (나레이션 만들기)</button>
 
     <section class="recent">
       <h2>최근 프로젝트</h2>

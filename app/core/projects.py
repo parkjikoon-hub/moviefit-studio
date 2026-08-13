@@ -49,19 +49,78 @@ def _slugify(name: str) -> str:
     return name[:40] or "프로젝트"
 
 
-def default_project(name: str, video_path: str | None, mode: str) -> dict[str, Any]:
+# 사진 한 장이 화면에 머무는 기본 시간(초). 너무 짧으면 눈이 못 따라간다.
+DEFAULT_IMAGE_DURATION = 3.0
+
+
+def normalize_images(raw: Any) -> list[dict[str, Any]]:
+    """사진 목록을 저장할 모양으로 다듬는다. 순서는 받은 그대로 지킨다.
+
+    각 칸의 뜻:
+        id       화면에서 이 사진을 가리키는 이름
+        path     원본 사진의 실제 경로 (복사하지 않는다)
+        duration 이 사진이 보이는 시간(초). seg_id 가 있으면 무시된다
+        seg_id   짝지어진 자막(가사) 줄. 값이 있으면 그 줄이 시작할 때 이 사진이 나온다
+    """
+    items: list[dict[str, Any]] = []
+    for index, entry in enumerate(raw or []):
+        if isinstance(entry, str):
+            entry = {"path": entry}
+        if not isinstance(entry, dict):
+            continue
+        path = str(entry.get("path") or "").strip()
+        if not path:
+            continue
+        try:
+            duration = float(entry.get("duration", DEFAULT_IMAGE_DURATION))
+        except (TypeError, ValueError):
+            duration = DEFAULT_IMAGE_DURATION
+        items.append(
+            {
+                "id": str(entry.get("id") or f"i{index + 1:03d}"),
+                "path": path,
+                "duration": max(0.1, round(duration, 3)),
+                "seg_id": entry.get("seg_id") or None,
+            }
+        )
+    return items
+
+
+def default_project(
+    name: str,
+    video_path: str | None,
+    mode: str,
+    images: Any = None,
+    audio_path: str | None = None,
+) -> dict[str, Any]:
     """새 프로젝트의 기본 내용. TECH_SPEC 5절의 데이터 모델."""
+    image_list = normalize_images(images)
+    # 사진이 들어 있으면 사진 영상 프로젝트다. mode 에 세 번째 값을 만들지 않는다 —
+    # mode 는 왼쪽 패널을 무엇으로 바꿀지 정하는 값이고, 두 단추짜리 토글이 깨진다.
+    output = dict(framing.DEFAULT_OUTPUT)
+    canvas = None
+    if image_list:
+        output["aspect"] = framing.DEFAULT_CANVAS_ASPECT
+        width, height = framing.canvas_size(output["aspect"])
+        canvas = {"width": width, "height": height}
+
     return {
         "version": SCHEMA_VERSION,
         "id": "",  # new_project()에서 채운다
         "name": name,
         "video_path": video_path,
+        # 음원 영상에서 쓰는 소리 파일. 영상 프로젝트에서는 언제나 None 이다.
+        "audio_path": audio_path,
+        # 사진 영상의 사진 목록. 비어 있으면 지금까지와 똑같은 영상/대본 프로젝트다.
+        "images": image_list,
+        # 사진들이 들어갈 화면 크기. 사진이 없으면 None (원본 영상이 기준이 된다).
+        "canvas": canvas,
         "mode": mode,  # "video" 또는 "script"
         "script": "",  # 대본 모드 원문
         "segments": [],
         "style": style_map.apply_preset("basic"),
         # 내보낼 때의 화면비 (롱폼·숏폼). 기본은 원본 그대로라 옛 프로젝트와 동작이 같다.
-        "output": dict(framing.DEFAULT_OUTPUT),
+        "output": output,
         "narration": {
             "gap": 0.3,
             "voice": "ko-KR-SunHiNeural",
@@ -88,14 +147,22 @@ def project_dir(project_id: str) -> Path:
     return PROJECTS_DIR / project_id
 
 
-def new_project(name: str, video_path: str | None = None, mode: str = "video") -> dict[str, Any]:
+def new_project(
+    name: str,
+    video_path: str | None = None,
+    mode: str = "video",
+    images: Any = None,
+    audio_path: str | None = None,
+) -> dict[str, Any]:
     """프로젝트 폴더를 만들고 project.json을 기록한 뒤 그 내용을 돌려준다."""
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     project_id = f"{stamp}_{_slugify(name)}"
 
-    data = default_project(name=name, video_path=video_path, mode=mode)
+    data = default_project(
+        name=name, video_path=video_path, mode=mode, images=images, audio_path=audio_path
+    )
     data["id"] = project_id
 
     pdir = project_dir(project_id)
@@ -220,6 +287,9 @@ def list_projects() -> list[dict[str, Any]]:
                 "name": data.get("name", pdir.name),
                 "mode": data.get("mode", "video"),
                 "video_path": data.get("video_path"),
+                # 옛 프로젝트에는 이 키들이 없다. 없으면 빈 값으로 받아 그대로 열리게 한다.
+                "audio_path": data.get("audio_path"),
+                "image_count": len(data.get("images") or []),
                 "segment_count": len(data.get("segments", [])),
                 "created_at": data.get("created_at", ""),
                 "updated_at": data.get("updated_at", ""),

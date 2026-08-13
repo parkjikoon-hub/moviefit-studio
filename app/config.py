@@ -20,6 +20,11 @@ VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a"}
 MEDIA_EXTS = VIDEO_EXTS | AUDIO_EXTS
 
+# 사진 영상(Phase 6)에서 받아들이는 사진 확장자.
+# MEDIA_EXTS 와 **일부러 합치지 않는다.** 합치면 "영상 자리에 사진 한 장"처럼
+# 뜻이 다른 조합을 걸러 낼 수 없게 된다.
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
 
 def ensure_dirs() -> None:
     """서버가 쓰는 폴더들이 없으면 만든다."""

@@ -13,27 +13,38 @@ from __future__ import annotations
 import subprocess
 import sys
 
-# 별도 프로세스에서 실행될 코드. 선택한 경로 한 줄만 표준출력으로 내보낸다.
+# 별도 프로세스에서 실행될 코드. 고른 경로를 **한 줄에 하나씩** 표준출력으로 내보낸다.
+# 한 개짜리 선택도 같은 규칙을 쓴다 — 부르는 쪽이 갈래를 하나만 다루면 되기 때문이다.
 _PICKER_CODE = r"""
 import sys, tkinter as tk
 from tkinter import filedialog
 
+# multi=True 면 여러 개를 한 번에 고를 수 있다 (사진은 수십 장을 고른다).
 KINDS = {
-    "media": ("영상 또는 오디오 파일 선택",
+    "media": ("영상 또는 오디오 파일 선택", False,
               [("영상/오디오 파일", "*.mp4 *.mov *.mkv *.webm *.mp3 *.wav *.m4a"),
                ("모든 파일", "*.*")]),
-    "subtitle": ("자막 파일 선택",
+    "subtitle": ("자막 파일 선택", False,
                  [("자막 파일", "*.srt *.vtt *.ass *.ssa"), ("모든 파일", "*.*")]),
+    "audio": ("음원 파일 선택", False,
+              [("음원 파일", "*.mp3 *.wav *.m4a"), ("모든 파일", "*.*")]),
+    "images": ("사진 선택 (여러 장을 한 번에 고를 수 있습니다)", True,
+               [("사진 파일", "*.jpg *.jpeg *.png *.webp"), ("모든 파일", "*.*")]),
 }
 kind = sys.argv[1] if len(sys.argv) > 1 else "media"
-title, filetypes = KINDS.get(kind, KINDS["media"])
+title, multi, filetypes = KINDS.get(kind, KINDS["media"])
 
 root = tk.Tk()
 root.withdraw()
 root.attributes("-topmost", True)   # 브라우저 뒤에 숨지 않게 맨 앞으로
-path = filedialog.askopenfilename(title=title, filetypes=filetypes)
+if multi:
+    picked = filedialog.askopenfilenames(title=title, filetypes=filetypes)
+    paths = list(picked or ())
+else:
+    one = filedialog.askopenfilename(title=title, filetypes=filetypes)
+    paths = [one] if one else []
 root.destroy()
-sys.stdout.write(path or "")
+sys.stdout.write("\n".join(paths))
 """
 
 
@@ -41,10 +52,11 @@ class FileDialogUnavailable(Exception):
     """파일 선택 창을 띄울 수 없는 환경 (예: 화면 없는 서버)."""
 
 
-def ask_media_file(timeout: float = 300.0, kind: str = "media") -> str | None:
-    """파일 선택 창을 띄우고 선택된 경로를 돌려준다. 취소하면 None.
+def ask_files(timeout: float = 300.0, kind: str = "media") -> list[str]:
+    """파일 선택 창을 띄우고 고른 경로들을 돌려준다. 취소하면 빈 목록.
 
-    kind="media"면 영상·오디오, kind="subtitle"이면 자막 파일만 걸러 보여 준다.
+    kind 는 "media"(영상·오디오) · "subtitle"(자막) · "audio"(음원) ·
+    "images"(사진 여러 장) 중 하나다. "images" 만 여러 개를 고를 수 있다.
     """
     try:
         result = subprocess.run(
@@ -57,7 +69,7 @@ def ask_media_file(timeout: float = 300.0, kind: str = "media") -> str | None:
     except FileNotFoundError as exc:  # 파이썬 실행 파일을 못 찾는 극단적 경우
         raise FileDialogUnavailable("파이썬 실행 파일을 찾을 수 없습니다.") from exc
     except subprocess.TimeoutExpired:
-        return None
+        return []
 
     if result.returncode != 0:
         raise FileDialogUnavailable(
@@ -65,5 +77,10 @@ def ask_media_file(timeout: float = 300.0, kind: str = "media") -> str | None:
             + (result.stderr or "").strip()
         )
 
-    path = (result.stdout or "").strip()
-    return path or None
+    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def ask_media_file(timeout: float = 300.0, kind: str = "media") -> str | None:
+    """파일 한 개를 고르게 하고 그 경로를 돌려준다. 취소하면 None."""
+    picked = ask_files(timeout=timeout, kind=kind)
+    return picked[0] if picked else None

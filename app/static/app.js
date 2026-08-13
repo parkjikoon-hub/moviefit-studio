@@ -186,6 +186,14 @@ function showEditor() {
   $("#view-editor").hidden = false;
 }
 
+// 최근 목록에 "무엇으로 만든 프로젝트인가"를 한 낱말로 보여 준다.
+// 옛 프로젝트에는 image_count·audio_path 가 없으므로 없을 때를 기본으로 둔다.
+function recentKind(p) {
+  if (p.image_count) return p.audio_path ? `음원+사진 ${p.image_count}장` : `사진 ${p.image_count}장`;
+  if (p.audio_path) return "음원";
+  return p.mode === "script" ? "대본" : "영상";
+}
+
 // ══ 최근 프로젝트 ══════════════════════════════════════════
 async function loadRecent() {
   const list = $("#recent-list");
@@ -207,7 +215,7 @@ async function loadRecent() {
 
       const meta = document.createElement("span");
       meta.className = "r-meta";
-      meta.textContent = `${p.mode === "script" ? "대본" : "영상"} · 자막 ${p.segment_count}개 · ${p.updated_at}`;
+      meta.textContent = `${recentKind(p)} · 자막 ${p.segment_count}개 · ${p.updated_at}`;
 
       const del = document.createElement("button");
       del.className = "r-del"; del.title = "이 프로젝트 삭제"; del.textContent = "✕";
@@ -240,9 +248,18 @@ async function openProject(id) {
   history.replaceState(null, "", `/?project=${encodeURIComponent(id)}`);
   maybeShowCoach();
 }
-async function createProject({ name, video_path, mode }) {
+async function createProject({ name, video_path, mode, image_paths, audio_path }) {
   try {
-    project = await api("/api/projects", { method: "POST", body: JSON.stringify({ name, video_path, mode }) });
+    project = await api("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        video_path: video_path || null,
+        mode: mode || "video",
+        image_paths: image_paths || null,
+        audio_path: audio_path || null,
+      }),
+    });
   } catch (err) { toast(err.message, { error: true }); return; }
   undoStack = []; redoStack = []; selectedId = null;
   renderProject(); showEditor();
@@ -1438,6 +1455,16 @@ function updateScriptStats() {
 }
 
 // ══ 시작 화면 연결 ═════════════════════════════════════════
+// 시작 화면의 카드는 <div role="button"> 이므로 키보드로 누르는 길을 직접 열어 준다.
+function wireCard(id, handler) {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener("click", handler);
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handler(); }
+  });
+}
+
 function wireStartScreen() {
   const pick = async () => {
     try {
@@ -1447,9 +1474,37 @@ function wireStartScreen() {
     } catch (err) { toast(err.message, { error: true }); }
   };
 
+  // 사진으로 시작 — 여러 장을 한 번에 고른다. 고른 순서가 곧 영상에 나오는 순서다.
+  const pickImages = async () => {
+    try {
+      const result = await api("/api/system/pick-file?kind=images", { method: "POST" });
+      if (result.cancelled) return;
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      await createProject({
+        name: `${stamp}_사진${result.paths.length}장`,
+        image_paths: result.paths,
+        mode: "video",
+      });
+    } catch (err) { toast(err.message, { error: true }); }
+  };
+
+  // 음원으로 시작 — mp3 하나로 시작하고 사진은 들어가서 추가한다.
+  const pickAudio = async () => {
+    try {
+      const result = await api("/api/system/pick-file?kind=audio", { method: "POST" });
+      if (result.cancelled) return;
+      await createProject({
+        name: result.name.replace(/\.[^.]+$/, ""),
+        audio_path: result.path,
+        mode: "video",
+      });
+    } catch (err) { toast(err.message, { error: true }); }
+  };
+
   const zone = $("#drop-zone");
-  zone.addEventListener("click", pick);
-  zone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  wireCard("#drop-zone", pick);
+  wireCard("#card-images", pickImages);
+  wireCard("#card-audio", pickAudio);
   zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("is-over"); });
   zone.addEventListener("dragleave", () => zone.classList.remove("is-over"));
   zone.addEventListener("drop", (e) => {
@@ -1463,7 +1518,7 @@ function wireStartScreen() {
     await createProject({ name: path.split(/[\\/]/).pop().replace(/\.[^.]+$/, ""), video_path: path, mode: "video" });
   });
 
-  $("#btn-start-script").addEventListener("click", () => {
+  wireCard("#btn-start-script", () => {
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     createProject({ name: `${stamp}_나레이션`, video_path: null, mode: "script" });
   });

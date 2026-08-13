@@ -46,6 +46,25 @@ ASPECT_LABELS = {
 # 여백을 흐린 원본으로 채울 때의 흐림 정도. 너무 약하면 배경이 눈에 띄어 산만하다.
 PAD_BLUR_SIGMA = 22
 
+# 사진 영상의 캔버스(사진들이 들어갈 화면) 크기.
+#
+# 영상 프로젝트와 사진 프로젝트는 관계가 뒤집힌다. 영상은 "원본 크기가 있고 화면비를
+# 고르면 출력 크기가 계산되어 나온다". 사진은 원본이 여러 개라 기준이 없으므로
+# **화면비를 고르는 것이 곧 출력 크기를 정하는 것**이다. 그래서 값을 여기 못 박는다.
+CANVAS_SIZES: dict[str, tuple[int, int]] = {
+    "16:9": (1920, 1080),
+    "9:16": (1080, 1920),
+    "1:1": (1080, 1080),
+}
+
+# 사진 프로젝트에서 "원본 그대로"는 뜻이 없다(원본이 여럿이다). 가로 16:9로 받는다.
+DEFAULT_CANVAS_ASPECT = "16:9"
+
+
+def canvas_size(aspect: str | None) -> tuple[int, int]:
+    """화면비 이름을 사진 영상의 캔버스 크기(가로, 세로)로 바꾼다."""
+    return CANVAS_SIZES.get(str(aspect or ""), CANVAS_SIZES[DEFAULT_CANVAS_ASPECT])
+
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
