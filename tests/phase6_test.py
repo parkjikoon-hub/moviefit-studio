@@ -39,7 +39,11 @@ sys.path.insert(0, str(ROOT))
 
 BASE = os.environ.get("MOVIEFIT_TEST_URL", "http://127.0.0.1:8765").rstrip("/")
 IMAGES_DIR = ROOT / "tests" / "sample" / "images"
-PROJECTS_DIR = ROOT / "projects"
+
+# 설치본을 겨냥해 점검할 때는 프로젝트가 **설치 폴더 안**에 만들어진다.
+# 저장소의 projects/ 를 계속 들여다보면 "방금 만든 프로젝트가 없다"며 엉뚱하게 실패한다.
+#   예)  set MOVIEFIT_TEST_PROJECTS=%LOCALAPPDATA%\Programs\MovieFit Studio\projects
+PROJECTS_DIR = Path(os.environ.get("MOVIEFIT_TEST_PROJECTS", str(ROOT / "projects")))
 
 passed: list[str] = []
 failed: list[str] = []

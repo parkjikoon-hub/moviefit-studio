@@ -150,7 +150,11 @@ def main() -> int:
 
     from app.core import audio_analysis  # noqa: E402  (서버가 아니라 파일을 직접 잰다)
 
-    audio_file = ROOT / "projects" / pid / result["audio"]
+    # 설치본을 겨냥할 때는 프로젝트가 **설치 폴더 안**에 만들어진다.
+    # 저장소의 projects/ 를 계속 보면 "파일이 없다"며 엉뚱하게 실패한다.
+    #   예)  set MOVIEFIT_TEST_PROJECTS=%LOCALAPPDATA%\Programs\MovieFit Studio\projects
+    projects_dir = Path(os.environ.get("MOVIEFIT_TEST_PROJECTS", str(ROOT / "projects")))
+    audio_file = projects_dir / pid / result["audio"]
     check("이어 붙인 오디오 파일이 실제로 있음", audio_file.is_file(), audio_file.name)
 
     regions = audio_analysis.detect_speech_regions(
