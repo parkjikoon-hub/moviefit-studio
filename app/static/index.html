@@ -162,6 +162,20 @@
           </div>
         </div>
 
+        <!-- 이미 말소리가 든 영상에 **내가 가진 대본**의 시간을 자동으로 붙인다.
+             음성인식은 받아쓰기를 틀리지만 '언제 말했는지'는 잘 맞힌다.
+             그래서 시각만 빌려 쓰고 글자는 내 대본을 쓴다. -->
+        <div class="grp"><h3>내 대본에 시간 붙이기</h3>
+          <div class="grp-body">
+        <textarea id="align-script" rows="5"
+          placeholder="영상에서 말하는 내용을 그대로 붙여넣어 주세요.&#10;띄어쓰기와 문장부호는 신경 쓰지 않아도 됩니다."></textarea>
+        <button id="btn-align" class="btn btn-wide">시간 붙이기</button>
+        <p class="hint">받아쓰기가 자꾸 틀릴 때 씁니다. 글자는 붙여넣은 대본을 쓰고
+          시각만 영상에서 가져옵니다. 짝을 못 찾아 <b>짐작한 줄</b>은 목록에 표시되며,
+          그 줄만 [두드려 맞추기]로 고치면 됩니다.</p>
+          </div>
+        </div>
+
         <div class="grp"><h3>자막 파일 가져오기</h3>
           <div class="grp-body">
         <button id="btn-import-srt" class="btn btn-wide">SRT · VTT 파일 불러오기</button>

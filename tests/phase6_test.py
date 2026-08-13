@@ -574,6 +574,127 @@ for i, (start, _end) in enumerate(LYRIC_TIMES):
 
 
 # ══════════════════════════════════════════════════════════════
+# 5. 단계 6 — 자막 강제정렬 (내 대본에 시간 붙이기)
+# ══════════════════════════════════════════════════════════════
+print("\n=== 단계 6 · 내 대본에 시간 붙이기 ===")
+
+# sample_10s.mp4 는 색 막대 + 사인파라 **말소리가 없다.** 강제정렬을 시험할 수 없으므로
+# 대본을 그대로 읽은 sample_speech.mp4 를 쓴다 (tools/make_sample_speech.py 로 만든다).
+SAMPLE_VIDEO = ROOT / "tests" / "sample" / "sample_speech.mp4"
+SCRIPT_FILE = ROOT / "tests" / "sample" / "sample_script.txt"
+
+if not SAMPLE_VIDEO.is_file() or not SCRIPT_FILE.is_file():
+    check("말소리가 든 샘플 영상과 대본이 준비되어 있다", False,
+          "python tools/make_sample_speech.py 로 만드세요 (인터넷 필요)")
+else:
+    check("말소리가 든 샘플 영상과 대본이 준비되어 있다", True, SAMPLE_VIDEO.name)
+    script_text = SCRIPT_FILE.read_text(encoding="utf-8").strip()
+
+    aligned_project = api(
+        "/api/projects", "POST",
+        {"name": "점검_강제정렬", "video_path": str(SAMPLE_VIDEO), "mode": "video"},
+    )
+    made_projects.append(aligned_project["id"])
+    apid = aligned_project["id"]
+
+    # ① 음성인식만으로 만든 자막 (견줄 기준)
+    print("  음성인식으로 기준 자막을 만드는 중… (몇 분 걸릴 수 있습니다)")
+    auto = run_job(
+        api(f"/api/projects/{apid}/stt", "POST",
+            {"language": "ko", "model": "small", "max_chars": 20, "max_lines": 2})["job_id"]
+    )
+    auto_segments = auto.get("segments") or []
+    check("음성인식이 기준 자막을 만들었다", len(auto_segments) > 0, f"{len(auto_segments)}개")
+
+    # ② 내 대본으로 시간 붙이기
+    print("  대본에 시간을 붙이는 중…")
+    aligned = run_job(
+        api(f"/api/projects/{apid}/align", "POST",
+            {"script": script_text, "language": "ko", "model": "small",
+             "max_chars": 20, "max_lines": 2})["job_id"]
+    )
+    seg_aligned = aligned.get("segments") or []
+    check(
+        "대본을 붙여넣고 [시간 붙이기] 를 누르면 자막이 시각과 함께 만들어진다",
+        len(seg_aligned) > 0 and all("start" in s and "end" in s for s in seg_aligned),
+        f"{len(seg_aligned)}개 (짐작한 줄 {aligned.get('guessed')}개)",
+    )
+    check(
+        "만들어진 자막의 글자는 **내 대본**의 글자다",
+        any("무비핏" in (s.get("text") or "") or "스튜디오" in (s.get("text") or "")
+            for s in seg_aligned),
+        " / ".join((s.get("text") or "")[:14] for s in seg_aligned[:3]),
+    )
+    check(
+        "시각이 앞에서 뒤로 흐른다 (뒤죽박죽이 아니다)",
+        all(seg_aligned[i]["start"] <= seg_aligned[i + 1]["start"]
+            for i in range(len(seg_aligned) - 1)),
+    )
+
+    # ③ 기준 자막과 시작 시각을 견준다.
+    #    글이 서로 다르므로 **글자가 가장 비슷한 줄끼리** 짝지어 비교한다.
+    import difflib as _difflib
+
+    def _plain(t: str) -> str:
+        return re.sub(r"[\s.,!?~…·]+", "", t or "")
+
+    gaps = []
+    for seg in seg_aligned:
+        best, score = None, 0.0
+        for other in auto_segments:
+            ratio = _difflib.SequenceMatcher(
+                None, _plain(seg.get("text")), _plain(other.get("text"))
+            ).ratio()
+            if ratio > score:
+                best, score = other, ratio
+        if best is not None and score >= 0.5:
+            gaps.append(abs(float(seg["start"]) - float(best["start"])))
+
+    if not gaps:
+        check("문장별 시작 시각 차이의 중앙값이 0.3초 이내", False,
+              "견줄 수 있는 짝을 못 찾았다 (음성인식 결과가 대본과 너무 다르다)")
+    else:
+        gaps.sort()
+        median = gaps[len(gaps) // 2] if len(gaps) % 2 else (gaps[len(gaps) // 2 - 1] + gaps[len(gaps) // 2]) / 2
+        check(
+            "음성인식 자막과 견주어 시작 시각 차이의 중앙값이 0.3초 이내",
+            median <= 0.3,
+            f"짝지은 {len(gaps)}줄 · 중앙값 {median:.3f}초 · 최대 {gaps[-1]:.3f}초",
+        )
+
+    # ④ 숫자가 든 문장을 넣어도 죽지 않고 그 줄을 '짐작함'으로 표시하는가.
+    #    대본에 "2024년"이라 쓰면 음성인식은 "이천이십사 년"이라 적어 글자가 안 맞는다.
+    number_script = (
+        "안녕하세요. 무비핏 스튜디오 테스트 대본입니다.\n"
+        "2024년에 만든 이 도구는 영상에서 자막을 자동으로 만들어 줍니다.\n"
+        "대본을 넣으면 나레이션 음성도 함께 만들어집니다.\n"
+        "자막과 음성의 타이밍은 자동으로 맞춰집니다."
+    )
+    try:
+        numbered = run_job(
+            api(f"/api/projects/{apid}/align", "POST",
+                {"script": number_script, "language": "ko", "model": "small",
+                 "max_chars": 20, "max_lines": 2})["job_id"]
+        )
+        check(
+            "대본에 숫자(2024년)가 들어 있어도 죽지 않는다",
+            len(numbered.get("segments") or []) > 0,
+            f"자막 {numbered.get('total')}개",
+        )
+        check(
+            "짝을 못 찾은 줄이 '짐작함'으로 표시된다",
+            any(s.get("guessed") for s in numbered["segments"]),
+            f"짐작한 줄 {numbered.get('guessed')}개 / 전체 {numbered.get('total')}개",
+        )
+    except Exception as exc:  # noqa: BLE001
+        check("대본에 숫자(2024년)가 들어 있어도 죽지 않는다", False, str(exc)[:80])
+
+    # ⑤ 빈 대본은 한국어로 거절한다 (시스템 경계 검증)
+    code, detail = api_error(f"/api/projects/{apid}/align", "POST", {"script": "   "})
+    check("대본이 비어 있으면 한국어로 알려 준다", code == 400 and "대본" in detail, detail[:60])
+
+
+# ══════════════════════════════════════════════════════════════
 # 마무리
 # ══════════════════════════════════════════════════════════════
 cleanup()

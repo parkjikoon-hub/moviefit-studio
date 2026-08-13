@@ -799,11 +799,15 @@ function buildSegmentRow(seg, index) {
   li.className = "seg-item";
   li.dataset.id = seg.id;
   if (seg.id === selectedId) li.classList.add("is-active");
+  // 강제정렬이 짝을 못 찾아 **시각을 짐작한 줄**. 사용자가 그 줄만 고치면 되도록 표시한다.
+  // 표시가 없으면 "완전 자동"이라고 믿게 되는데, 그 줄의 시각은 실제로 부정확하다.
+  if (seg.guessed) li.classList.add("is-guessed");
 
   // 번호
   const no = document.createElement("span");
   no.className = "seg-no";
   no.textContent = index + 1;
+  if (seg.guessed) no.title = "시각을 짐작한 줄입니다. [두드려 맞추기]로 고쳐 주세요.";
 
   // 시간 (넛지 버튼 + 직접 입력)
   const times = document.createElement("div");
@@ -1961,15 +1965,41 @@ function wireEditor() {
   $("#stt-model").addEventListener("change", (e) => { project.stt.model = e.target.value; markDirty(); });
 
   $("#btn-stt").addEventListener("click", runSTT);
+  $("#btn-align").addEventListener("click", runAlign);
   $("#btn-export").addEventListener("click", openExportDialog);
   $("#btn-tts").addEventListener("click", runNarration);
   $("#btn-import-srt").addEventListener("click", importSubtitleFile);
   $("#btn-to-script").addEventListener("click", () => {
     if (!segments().length) { toast("옮길 자막이 없습니다.", { error: true }); return; }
+
+    // 나레이션을 만들면 자막 시각이 **나레이션 길이 기준으로 전부 새로 계산된다.**
+    // 공들여 맞춰 놓은 시각이 소리 없이 사라지므로 옮기기 전에 반드시 알린다.
+    const ok = confirm(
+      `자막 ${segments().length}개를 대본으로 옮깁니다.\n\n` +
+      `⚠ 지금 자막에 맞춰 둔 시각은 나레이션을 만드는 순간 ` +
+      `나레이션 길이에 맞춰 새로 계산됩니다. 지금 시각은 남지 않습니다.\n\n` +
+      `목소리만 바꾸려는 것이라면 그대로 진행하시면 됩니다.\n계속할까요?`
+    );
+    if (!ok) return;
+
+    snapshot();
     project.script = segments().map((s) => s.text).filter(Boolean).join("\n");
     $("#script-input").value = project.script;
+
+    // 목소리를 바꾸려는 흐름이다 — 원본 소리가 들리면 두 목소리가 겹쳐 들린다.
+    // 기본값 30%를 0%로 내리고, 무엇을 바꿨는지 알린다.
+    let muted = false;
+    if (project.narration && Number(project.narration.original_audio_volume) !== 0) {
+      project.narration.original_audio_volume = 0;
+      muted = true;
+      renderNarrationPanel();
+    }
+
     updateScriptStats(); setMode("script"); markDirty();
-    toast("자막을 대본으로 옮겼습니다.");
+    toast(
+      "자막을 대본으로 옮겼습니다." +
+      (muted ? " 원본 소리는 0%로 내렸습니다 (목소리가 겹쳐 들리지 않도록)." : "")
+    );
   });
 
   // 편집기 도구
@@ -2122,6 +2152,54 @@ function wireShortcuts() {
     }
     else if (e.key === "Delete" && selectedId) { e.preventDefault(); deleteSegment(selectedId); }
   });
+}
+
+// ══ 내 대본에 시간 붙이기 (강제정렬) ═══════════════════════
+async function runAlign() {
+  if (!project?.video_path && !project?.audio_path) {
+    toast("먼저 말소리가 든 영상이나 음성 파일을 불러와 주세요.", { error: true });
+    return;
+  }
+  const script = ($("#align-script").value || "").trim();
+  if (!script) {
+    toast("영상에서 말하는 내용을 붙여넣어 주세요.", { error: true });
+    $("#align-script").focus();
+    return;
+  }
+  if (segments().length && !confirm(
+    `이미 자막 ${segments().length}개가 있습니다.\n시간을 붙이면 지금 자막을 모두 덮어씁니다.\n\n계속할까요?`)) {
+    return;
+  }
+
+  const result = await runJob("대본에 시간을 붙이고 있습니다", () =>
+    api(`/api/projects/${encodeURIComponent(project.id)}/align`, {
+      method: "POST",
+      body: JSON.stringify({
+        script,
+        language: project.stt.language,
+        model: project.stt.model,
+        max_chars: project.style.max_chars,
+        max_lines: project.style.max_lines,
+      }),
+    })
+  );
+  if (!result) return;
+
+  snapshot();
+  project.segments = result.segments || [];
+  renderAll();
+  clearTimeout(saveTimer);
+  await saveNow();
+
+  const guessed = result.guessed || 0;
+  if (guessed) {
+    toast(
+      `자막 ${result.total}개를 만들었습니다. 그중 ${guessed}개는 짝을 못 찾아 ` +
+      `시각을 짐작했습니다 — 목록에서 노란 표시가 된 줄을 [두드려 맞추기]로 고쳐 주세요.`
+    );
+  } else {
+    toast(`자막 ${result.total}개를 만들었습니다. 모든 줄이 잘 맞았습니다.`);
+  }
 }
 
 // ══ 자막 자동 생성 (F-10) ══════════════════════════════════

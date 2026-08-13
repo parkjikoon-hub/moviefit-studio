@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core import ffmpeg, framing, jobs, slideshow, stt, style_map, subtitles
+from app.core import align, ffmpeg, framing, jobs, slideshow, stt, style_map, subtitles
 from app.core import projects as store
 
 router = APIRouter(prefix="/api/projects", tags=["render"])
@@ -87,6 +87,84 @@ def start_stt(project_id: str, req: STTRequest) -> dict[str, Any]:
         max_chars=req.max_chars,
         max_lines=req.max_lines,
         corrections=corrections,
+    )
+    return {"job_id": job_id}
+
+
+# ── 내 대본에 시간 붙이기 (강제정렬) ──────────────────────
+class AlignRequest(BaseModel):
+    script: str
+    language: str = "ko"
+    model: str = "small"
+    max_chars: int = 20
+    max_lines: int = 2
+
+
+def _align_script(
+    report, *, project_id: str, script: str, language: str | None,
+    model_size: str, max_chars: int, max_lines: int,
+) -> dict[str, Any]:
+    """음성인식으로 '언제 말했는지'만 얻고, 글자는 사용자 대본을 쓴다."""
+    data = store.load_project(project_id)
+    media = data.get("video_path") or data.get("audio_path")
+    if not media or not Path(media).is_file():
+        raise RuntimeError("원본 파일을 찾을 수 없습니다. 옮기거나 지우셨나요?")
+
+    def _stt_report(fraction: float, message: str) -> None:
+        report(0.92 * max(0.0, min(1.0, fraction)), message)
+
+    heard = stt.transcribe(
+        _stt_report,
+        media_path=str(media),
+        language=language,
+        model_size=model_size,
+        max_chars=max_chars,
+        max_lines=max_lines,
+        corrections=[],
+    )
+
+    report(0.94, "대본과 말소리를 맞춰 보고 있습니다…")
+    try:
+        aligned = align.align_script(
+            script, heard.get("words") or [], duration=heard.get("duration")
+        )
+    except align.AlignError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    report(0.97, "자막 문장으로 나누고 있습니다…")
+    segments = subtitles.split_into_segments(aligned, max_chars=max_chars, max_lines=max_lines)
+    subtitles.apply_corrections(segments, data.get("dictionary") or [])
+    align.mark_guessed_segments(segments, aligned)
+
+    guessed = sum(1 for s in segments if s.get("guessed"))
+    report(1.0, f"자막 {len(segments)}개를 만들었습니다 (짐작한 줄 {guessed}개).")
+    return {
+        "segments": segments,
+        "guessed": guessed,
+        "total": len(segments),
+        "duration": heard.get("duration"),
+    }
+
+
+@router.post("/{project_id}/align")
+def start_align(project_id: str, req: AlignRequest) -> dict[str, Any]:
+    """이미 말소리가 든 영상에 **내가 가진 대본**의 시간을 자동으로 붙인다."""
+    data = _load(project_id)
+    _require_media(data)
+
+    if not (req.script or "").strip():
+        raise HTTPException(400, "대본이 비어 있습니다. 영상에서 말하는 내용을 붙여넣어 주세요.")
+
+    job_id = jobs.submit(
+        "align",
+        "대본에 시간을 붙이고 있습니다",
+        _align_script,
+        project_id=project_id,
+        script=req.script,
+        language=None if req.language == "auto" else req.language,
+        model_size=req.model,
+        max_chars=req.max_chars,
+        max_lines=req.max_lines,
     )
     return {"job_id": job_id}
 

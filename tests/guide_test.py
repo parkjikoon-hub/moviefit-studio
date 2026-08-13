@@ -145,7 +145,15 @@ check(
     not broken,
     "깨진 고리: " + ", ".join(broken) if broken else f"장 {len(anchors)}개",
 )
-check("장이 15개다 (화면비 장이 늘어난 뒤)", len(anchors) == 15, f"{len(anchors)}개")
+# 장 수를 숫자로 못박으면 장이 하나 늘 때마다 이 파일도 고쳐야 하고, 고치는 것을
+# 잊으면 "설명서를 늘렸는데 점검이 실패하는" 헛수고가 생긴다. 그래서 **원본 마크다운의
+# 장 수**와 대조한다. 이러면 "생성기가 한 장을 통째로 삼켰다"도 그대로 잡힌다.
+_md_chapters = re.findall(r"^## \d+\. ", (ROOT / "docs" / "USER_GUIDE.md").read_text(encoding="utf-8"), re.M)
+check(
+    f"HTML 의 장 수가 원본 마크다운과 같다 ({len(_md_chapters)}개)",
+    len(anchors) == len(_md_chapters),
+    f"HTML {len(anchors)}개 · 원본 {len(_md_chapters)}개",
+)
 
 # ── 5절. 세 곳이 어긋나 있지 않은가 ─────────────────────────────────────
 print("\n5절 · 세 곳(원본·소개 사이트·프로그램 안)이 어긋나지 않는가")
@@ -173,8 +181,9 @@ def chapters(html: str) -> list[str]:
 
 check(
     "소개 사이트와 프로그램 안의 장 제목이 완전히 같다",
-    chapters(landing) == chapters(app_file) and len(chapters(landing)) == 15,
-    f"소개 {len(chapters(landing))}장 · 프로그램 {len(chapters(app_file))}장",
+    chapters(landing) == chapters(app_file) and len(chapters(landing)) == len(_md_chapters),
+    f"소개 {len(chapters(landing))}장 · 프로그램 {len(chapters(app_file))}장 "
+    f"· 원본 {len(_md_chapters)}장",
 )
 check(
     "서버가 내보낸 설명서가 저장소의 파일과 같다",

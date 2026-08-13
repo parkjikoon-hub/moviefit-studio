@@ -386,6 +386,54 @@ try:
         first_row = page.locator("#photo-list .photo-item .photo-name").first.inner_text()
         check("사진 목록에 어느 가사 줄에 붙었는지 보인다", "♪" in first_row, first_row[:40])
 
+        # ── 강제정렬이 '짐작한 줄'을 화면에 표시하는가 (단계 6) ──
+        print("\n=== 짐작한 자막 줄이 화면에 표시되는가 ===")
+        page.evaluate("""() => {
+          project.segments = [
+            {id: 'g1', start: 0, end: 2, text: '잘 맞은 줄'},
+            {id: 'g2', start: 2, end: 4, text: '짐작한 줄', guessed: true},
+            {id: 'g3', start: 4, end: 6, text: '또 잘 맞은 줄'},
+          ];
+          renderAll();
+        }""")
+        page.wait_for_timeout(300)
+        rows = page.locator("#seg-list .seg-item")
+        marked = page.locator("#seg-list .seg-item.is-guessed")
+        check("짐작한 줄만 표시가 붙는다", rows.count() == 3 and marked.count() == 1,
+              f"자막 {rows.count()}줄 중 {marked.count()}줄에 표시")
+        if marked.count():
+            border = marked.first.evaluate("el => getComputedStyle(el).borderLeftWidth")
+            check("표시가 눈에 보이는 형태다 (왼쪽 띠)", border not in ("", "0px"), border)
+            title = marked.first.locator(".seg-no").get_attribute("title") or ""
+            check("무엇을 해야 하는지 알려 준다", "두드려 맞추기" in title, title[:60])
+
+        # ── 단계 7: [자막을 대본으로] 가 미리 알려 주는가 ──────────
+        print("\n=== [자막을 대본으로] 를 눌러 본다 ===")
+        page.evaluate("""() => {
+          project.segments = [
+            {id: 'a1', start: 0, end: 2, text: '첫 문장입니다'},
+            {id: 'a2', start: 2, end: 4, text: '둘째 문장입니다'},
+          ];
+          project.narration = Object.assign({}, project.narration, {original_audio_volume: 30});
+          renderAll(); renderNarrationPanel();
+        }""")
+        page.wait_for_timeout(200)
+
+        seen_dialog = {"text": ""}
+        page.once("dialog", lambda d: (seen_dialog.__setitem__("text", d.message), d.accept()))
+        page.locator("#btn-to-script").click()
+        page.wait_for_timeout(600)
+        check(
+            "옮기기 전에 '자막 시각이 새로 계산된다'고 미리 알려 준다",
+            "새로 계산" in seen_dialog["text"],
+            seen_dialog["text"].replace("\n", " ")[:110],
+        )
+        vol = page.evaluate("project.narration.original_audio_volume")
+        check("목소리 교체 흐름에서 원본 소리 볼륨이 0%가 된다", vol == 0, f"{vol}%")
+        script_now = page.evaluate("document.querySelector('#script-input').value")
+        check("자막 글이 대본 칸으로 옮겨졌다", "첫 문장입니다" in (script_now or ""),
+              (script_now or "").replace("\n", " / ")[:60])
+
         check("음원 화면에서 자바스크립트 오류가 나지 않았다", not errs, " / ".join(errs[:2]))
         browser.close()
 

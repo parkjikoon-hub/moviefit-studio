@@ -179,6 +179,9 @@ def transcribe(
     report(1.0, f"자막 {len(segments)}개를 만들었습니다.")
     return {
         "segments": segments,
+        # 단어 하나하나의 시각. 강제정렬(내 대본에 시간 붙이기)이 이것을 쓴다.
+        # 여기서 버리면 같은 영상을 두 번 인식해야 한다.
+        "words": words,
         "language": getattr(info, "language", None),
         "language_probability": round(float(getattr(info, "language_probability", 0.0) or 0.0), 3),
         "duration": round(duration, 2),
