@@ -211,6 +211,54 @@ def resolve(src_width: int, src_height: int, output: dict[str, Any] | None) -> d
     }
 
 
+def fit_filter(
+    canvas_w: int,
+    canvas_h: int,
+    output: dict[str, Any] | None = None,
+) -> str:
+    """사진 한 장을 **반드시 정확히** canvas_w×canvas_h 로 만드는 필터 문자열.
+
+    resolve() 를 사진에 쓸 수 없는 이유가 두 가지다.
+      · crop 갈래는 잘라낸 **그 크기**를 출력으로 삼는다. 사진마다 크기가 다르니
+        결과 크기도 제각각이 되어, 이어붙일 때 조용한 실패로 직행한다.
+      · pad 갈래는 틀 크기를 "원본의 긴 변"으로 정한다. 역시 사진마다 달라진다.
+
+    그래서 이 함수는 **크기를 먼저 못 박고** 그 안에 사진을 넣는다.
+    잘라내기·여백 채우기·흐린 배경이라는 말과 개념은 resolve() 와 똑같이 쓴다.
+
+    setsar=1(화소 모양비 1:1)을 빠뜨리면 사진에 따라 결과가 찌그러진다.
+    """
+    conf = normalize(output)
+    width, height = _even(canvas_w), _even(canvas_h)
+    fx = conf["focus_x"] / 100.0
+    fy = conf["focus_y"] / 100.0
+
+    if conf["fit"] == "crop":
+        # 틀을 꽉 채우도록 키운 뒤 넘치는 부분을 잘라 낸다.
+        # 자르는 자리는 focus 가 정한다 (0이면 왼쪽/위 끝, 100이면 오른쪽/아래 끝).
+        return (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}:(iw-{width})*{fx:.4f}:(ih-{height})*{fy:.4f},"
+            f"setsar=1"
+        )
+
+    if conf["pad_blur"]:
+        # 배경으로 깔 흐린 사진과 앞에 얹을 사진 두 갈래로 나눈다.
+        return (
+            f"split=2[bg][fg];"
+            f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},gblur=sigma={PAD_BLUR_SIGMA}[bgb];"
+            f"[fg]scale={width}:{height}:force_original_aspect_ratio=decrease[fgs];"
+            f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1"
+        )
+
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,"
+        f"setsar=1"
+    )
+
+
 def chain(frame_filter: str | None, *rest: str) -> str:
     """화면비 필터 뒤에 다른 필터(자막 등)를 잇는다. 순서가 중요하다.
 

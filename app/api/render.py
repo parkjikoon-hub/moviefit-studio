@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core import ffmpeg, framing, jobs, stt, style_map, subtitles
+from app.core import ffmpeg, framing, jobs, slideshow, stt, style_map, subtitles
 from app.core import projects as store
 
 router = APIRouter(prefix="/api/projects", tags=["render"])
@@ -26,13 +26,37 @@ def _load(project_id: str) -> dict[str, Any]:
 
 
 def _require_media(data: dict[str, Any]) -> Path:
-    path = data.get("video_path")
+    path = data.get("video_path") or data.get("audio_path")
     if not path:
         raise HTTPException(400, "이 프로젝트에는 영상이나 음성 파일이 없습니다.")
     media = Path(path)
     if not media.is_file():
         raise HTTPException(400, f"파일을 찾을 수 없습니다. 옮기거나 지우셨나요?\n{path}")
     return media
+
+
+def _images_of(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """사진 목록. 옛 프로젝트에는 이 칸이 없으므로 없으면 빈 목록으로 받는다."""
+    return data.get("images") or []
+
+
+def _require_frame_source(data: dict[str, Any]) -> None:
+    """영상을 만들려면 '그림이 될 것'이 있어야 한다 — 원본 영상이거나 사진들이거나.
+
+    음원만 있는 프로젝트는 소리는 있지만 화면이 없다. 그대로 내보내려 하면
+    FFmpeg 이 "화면 크기 정보를 찾지 못했습니다"라는 알아듣기 어려운 말을 한다.
+    """
+    if _images_of(data):
+        return
+    if data.get("video_path"):
+        _require_media(data)
+        return
+    if data.get("audio_path"):
+        raise HTTPException(
+            400,
+            "음원만 있어서 화면에 보일 것이 없습니다. 왼쪽 [사진] 칸에서 사진을 넣어 주세요.",
+        )
+    raise HTTPException(400, "이 프로젝트에는 영상이나 사진이 없습니다.")
 
 
 # ── 자막 자동 생성 (F-10) ─────────────────────────────────
@@ -69,7 +93,7 @@ def start_stt(project_id: str, req: STTRequest) -> dict[str, Any]:
 
 # ── 내보내기 (F-03, F-50, F-54) ──────────────────────────
 class RenderRequest(BaseModel):
-    kind: str  # "srt" | "vtt" | "burn" | "preview"
+    kind: str  # "srt" | "vtt" | "burn" | "preview" | "slideshow"
     preview_seconds: int = 10
 
 
@@ -108,12 +132,26 @@ def _export_subtitle_file(report, *, project_id: str, kind: str) -> dict[str, An
     }
 
 
-def _export_video(report, *, project_id: str, preview: bool, seconds: int) -> dict[str, Any]:
-    """자막을 영상에 새긴다. 미리보기면 앞부분만 만든다."""
+def _export_video(
+    report, *, project_id: str, preview: bool, seconds: int, with_subtitles: bool = True
+) -> dict[str, Any]:
+    """자막을 영상에 새긴다. 미리보기면 앞부분만 만든다.
+
+    사진 프로젝트면 원본 영상 대신 사진들을 이어붙여 만든다. with_subtitles 가
+    False 면 자막 없이 사진만으로 만든다 (사진을 넣자마자 결과를 볼 수 있게).
+    """
     data = store.load_project(project_id)
-    segments = data.get("segments") or []
-    if not segments:
+    segments = (data.get("segments") or []) if with_subtitles else []
+    images = data.get("images") or []
+
+    if with_subtitles and not segments:
         raise RuntimeError("내보낼 자막이 없습니다. 먼저 자막을 만들어 주세요.")
+
+    if images:
+        return _export_slideshow(
+            report, data=data, project_id=project_id,
+            segments=segments, preview=preview, seconds=seconds,
+        )
 
     video_path = data.get("video_path")
     if not video_path or not Path(video_path).is_file():
@@ -150,9 +188,59 @@ def _export_video(report, *, project_id: str, preview: bool, seconds: int) -> di
     )
 
 
+def _export_slideshow(
+    report, *, data: dict[str, Any], project_id: str,
+    segments: list[dict[str, Any]], preview: bool, seconds: int,
+) -> dict[str, Any]:
+    """사진들을 이어붙여 영상을 만든다. 자막과 음원은 있으면 함께 들어간다."""
+    images = slideshow.resolve_durations(data)
+    output = framing.normalize(data.get("output"))
+    canvas = slideshow.canvas_of(data)
+    style = style_map.normalize(data.get("style"))
+
+    tag = f"_{output['aspect'].replace(':', '-')}" if output["aspect"] != "source" else ""
+    base = _safe_name(data)
+    if preview:
+        out_name = f"{base}{tag}_미리보기.mp4"
+    elif segments:
+        out_name = f"{base}{tag}_자막.mp4"
+    else:
+        out_name = f"{base}{tag}_사진영상.mp4"
+
+    return slideshow.build_slideshow(
+        report,
+        project_dir=store.project_dir(project_id),
+        images=images,
+        canvas=canvas,
+        output=output,
+        out_dir=store.project_dir(project_id) / "out",
+        out_name=out_name,
+        segments=segments,
+        style=style,
+        audio_path=data.get("audio_path"),
+        seconds=float(seconds) if preview else None,
+        fast=preview,
+    )
+
+
 @router.post("/{project_id}/render")
 def start_render(project_id: str, req: RenderRequest) -> dict[str, Any]:
     data = _load(project_id)
+
+    # 사진 영상은 자막 없이도 만들 수 있다 — 사진을 넣자마자 결과를 볼 수 있어야 한다.
+    if req.kind == "slideshow":
+        if not _images_of(data):
+            raise HTTPException(400, "사진이 한 장도 없습니다. 먼저 사진을 넣어 주세요.")
+        job_id = jobs.submit(
+            "render",
+            "사진으로 영상을 만들고 있습니다",
+            _export_video,
+            project_id=project_id,
+            preview=False,
+            seconds=req.preview_seconds,
+            with_subtitles=False,
+        )
+        return {"job_id": job_id}
 
     if not (data.get("segments") or []):
         raise HTTPException(400, "내보낼 자막이 없습니다. 먼저 자막을 만들어 주세요.")
@@ -168,7 +256,7 @@ def start_render(project_id: str, req: RenderRequest) -> dict[str, Any]:
         return {"job_id": job_id}
 
     if req.kind in ("burn", "preview"):
-        _require_media(data)
+        _require_frame_source(data)
         preview = req.kind == "preview"
         job_id = jobs.submit(
             "render",
@@ -180,7 +268,9 @@ def start_render(project_id: str, req: RenderRequest) -> dict[str, Any]:
         )
         return {"job_id": job_id}
 
-    raise HTTPException(400, "내보내기 종류는 srt, vtt, burn, preview 중 하나여야 합니다.")
+    raise HTTPException(
+        400, "내보내기 종류는 srt, vtt, burn, preview, slideshow 중 하나여야 합니다."
+    )
 
 
 # ── 자막 파일 가져오기 (F-04) ─────────────────────────────

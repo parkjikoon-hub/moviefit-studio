@@ -82,6 +82,86 @@ def sample_images(count: int) -> list[Path]:
     return files[:count]
 
 
+def probe_size(path: Path) -> tuple[int, int]:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height", "-of", "json", str(path)],
+        capture_output=True, text=True, timeout=120,
+    )
+    stream = json.loads(out.stdout)["streams"][0]
+    return int(stream["width"]), int(stream["height"])
+
+
+def probe_duration(path: Path) -> float:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "json", str(path)],
+        capture_output=True, text=True, timeout=120,
+    )
+    return float(json.loads(out.stdout)["format"]["duration"])
+
+
+def frame_color(path: Path, at: float) -> tuple[int, int, int]:
+    """영상의 특정 시각에서 화면 한가운데 색을 잰다.
+
+    이 검사가 이 파일의 심장이다. 크기가 다른 사진을 잘못 이어붙이면 FFmpeg 이
+    아무 오류 없이 "마지막 사진만 되풀이되는 영상"을 내놓는다. 길이만 재면
+    통과하고, 색을 재야 드러난다.
+    """
+    out = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", f"{at:.3f}", "-i", str(path),
+         "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, timeout=120,
+    )
+    raw = out.stdout
+    if len(raw) < 3:
+        raise RuntimeError(f"{at}초 지점의 화면을 읽지 못했습니다.")
+    return (raw[0], raw[1], raw[2])
+
+
+def image_color(path: Path) -> tuple[int, int, int]:
+    """사진 한 장의 색 (한 가지 색으로 꽉 찬 시험용 사진이다)."""
+    out = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path),
+         "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, timeout=120,
+    )
+    raw = out.stdout
+    return (raw[0], raw[1], raw[2])
+
+
+def close_color(a: tuple[int, int, int], b: tuple[int, int, int], tol: int = 14) -> bool:
+    """jpeg 압축과 색 공간 변환 때문에 값이 조금 흔들린다. 그만큼은 봐준다."""
+    return all(abs(x - y) <= tol for x, y in zip(a, b))
+
+
+def run_job(job_id: str, limit: float = 900.0) -> dict:
+    deadline = time.time() + limit
+    while time.time() < deadline:
+        info = api(f"/api/jobs/{job_id}")
+        if info["status"] == "done":
+            return info.get("result") or {}
+        if info["status"] in ("error", "cancelled"):
+            raise RuntimeError(info.get("message") or info["status"])
+        time.sleep(0.7)
+    raise TimeoutError("작업이 제한 시간 안에 끝나지 않았습니다.")
+
+
+def watch_job(job_id: str, limit: float = 900.0) -> tuple[dict, list[tuple[float, str]]]:
+    """작업을 지켜보며 진행률과 문구를 모두 모아 둔다 (진행률이 진짜인지 보려고)."""
+    seen: list[tuple[float, str]] = []
+    deadline = time.time() + limit
+    while time.time() < deadline:
+        info = api(f"/api/jobs/{job_id}")
+        seen.append((float(info.get("progress") or 0.0), str(info.get("message") or "")))
+        if info["status"] == "done":
+            return info.get("result") or {}, seen
+        if info["status"] in ("error", "cancelled"):
+            raise RuntimeError(info.get("message") or info["status"])
+        time.sleep(0.4)
+    raise TimeoutError("작업이 제한 시간 안에 끝나지 않았습니다.")
+
+
 def cleanup() -> None:
     for pid in made_projects:
         try:
@@ -220,6 +300,111 @@ check(
     "사진 프로젝트는 최근 목록에 사진 장수가 나온다",
     new_row is not None and new_row.get("image_count") == 3,
     f"image_count={new_row.get('image_count') if new_row else '없음'}",
+)
+
+
+# ══════════════════════════════════════════════════════════════
+# 2. 단계 2 — 사진을 영상으로 만든다 (자막 없이)
+# ══════════════════════════════════════════════════════════════
+print("\n=== 단계 2 · 사진을 영상으로 만든다 ===")
+
+THIRTY = sample_images(30)
+big = api(
+    "/api/projects", "POST",
+    {"name": "점검_사진30장", "image_paths": [str(p) for p in THIRTY], "mode": "video"},
+)
+made_projects.append(big["id"])
+
+# 장당 3초, 세로 9:16 로 맞춘다. 사진 크기가 제각각이므로 잘라내기로 채운다.
+big["output"] = {"aspect": "9:16", "fit": "crop", "focus_x": 50.0, "focus_y": 50.0, "pad_blur": True}
+for img in big["images"]:
+    img["duration"] = 3.0
+api(f"/api/projects/{big['id']}", "PUT", big)
+
+started = time.time()
+job = api(f"/api/projects/{big['id']}/render", "POST", {"kind": "slideshow"})
+result, timeline = watch_job(job["job_id"])
+elapsed = time.time() - started
+video = Path(result["path"])
+
+check("사진 30장으로 영상이 만들어졌다", video.is_file(), f"{video.name} · {elapsed:.1f}초 걸림")
+
+duration = probe_duration(video)
+check(
+    "길이가 90.0초 ± 0.1초 이다 (30장 × 3초)",
+    abs(duration - 90.0) <= 0.1,
+    f"실제 {duration:.3f}초",
+)
+
+width, height = probe_size(video)
+check("크기가 정확히 1080×1920 이다", (width, height) == (1080, 1920), f"실제 {width}×{height}")
+
+# ── 조용한 실패를 잡는 검사 (빼면 안 된다) ──────────────────
+# 크기가 다른 사진을 잘못 이어붙이면 오류 없이 마지막 사진만 되풀이된다.
+for at, nth in ((1.0, 1), (46.0, 16), (89.0, 30)):
+    want = image_color(THIRTY[nth - 1])
+    got = frame_color(video, at)
+    check(
+        f"t={at:.0f}초 화면이 {nth}번째 사진과 같다",
+        close_color(got, want),
+        f"기대 RGB{want} / 실제 RGB{got}",
+    )
+
+# ── 진행률이 진짜인가 ────────────────────────────────────────
+progresses = [p for p, _ in timeline]
+rising = sum(1 for a, b in zip(progresses, progresses[1:]) if b > a)
+check(
+    "진행률이 여러 번에 걸쳐 올라간다",
+    rising >= 3 and max(progresses) >= 0.99,
+    f"{len(progresses)}번 살펴 {rising}번 올랐다 (최대 {max(progresses):.2f})",
+)
+# 문구에 실제 영상 시각이 들어 있으면 FFmpeg 이 보고한 진짜 진척이다 (타이머 흉내가 아니다).
+times: list[int] = []
+for _p, message in timeline:
+    m = re.search(r"\((?:(\d+)분\s*)?(\d+)초 / ", message)
+    if m:
+        times.append(int(m.group(1) or 0) * 60 + int(m.group(2)))
+check(
+    "진행률이 FFmpeg 이 실제로 처리한 시각을 따라간다 (타이머 흉내가 아니다)",
+    len(times) >= 2 and times == sorted(times) and times[-1] > times[0],
+    f"보고된 처리 시각: {times[:3]} … {times[-1]}초" if times else "시각이 든 문구가 없었다",
+)
+# 사진 준비 단계도 진행률에 보여야 한다 (30장이면 눈에 띄게 걸린다).
+check(
+    "사진을 준비하는 동안에도 무엇을 하는지 알려 준다",
+    any("사진을 준비하고" in message for _p, message in timeline),
+    "'사진을 준비하고 있습니다 (n / 30장)' 문구",
+)
+
+# ── 취소하면 정말 멈추고 반쪽 파일이 안 남는가 ───────────────
+out_dir = PROJECTS_DIR / big["id"] / "out"
+before = {p.name for p in out_dir.glob("*")}
+job2 = api(f"/api/projects/{big['id']}/render", "POST", {"kind": "slideshow"})
+time.sleep(2.5)
+api(f"/api/jobs/{job2['job_id']}/cancel", "POST")
+cancelled = False
+for _ in range(40):
+    info = api(f"/api/jobs/{job2['job_id']}")
+    if info["status"] in ("cancelled", "error", "done"):
+        cancelled = info["status"] == "cancelled"
+        break
+    time.sleep(0.5)
+check("만드는 도중 [취소]를 누르면 실제로 멈춘다", cancelled, f"상태 {info['status']}")
+
+leftovers = [p.name for p in out_dir.glob("*") if p.name not in before and p.suffix == ".mp4"]
+half_files = [p.name for p in out_dir.glob(".*")]
+check(
+    "취소한 뒤 반쪽짜리 파일이 남지 않는다",
+    not leftovers and not half_files,
+    f"새로 생긴 것: {leftovers + half_files}" if (leftovers or half_files) else "깨끗함",
+)
+
+# ── 두 번째 내보내기는 준비를 다시 하지 않는다 (정규화 캐시) ──
+cache_files = list((PROJECTS_DIR / big["id"] / "cache").glob("norm_*.jpg"))
+check(
+    "정규화한 사진이 프로젝트 폴더에 남아 다음번에 다시 쓰인다",
+    len(cache_files) == 30,
+    f"cache/ 에 {len(cache_files)}장",
 )
 
 
