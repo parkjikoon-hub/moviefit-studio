@@ -78,6 +78,7 @@ class NarrationExportRequest(BaseModel):
     fmt: str = "mp3"  # audio일 때만
     original_volume: int | None = None
     duck: bool | None = None
+    duck_level: str | None = None  # "weak" | "normal" | "strong"
 
 
 def _export_audio(report, *, project_id: str, fmt: str) -> dict[str, Any]:
@@ -99,7 +100,7 @@ def _export_audio(report, *, project_id: str, fmt: str) -> dict[str, Any]:
 
 
 def _export_video(
-    report, *, project_id: str, original_volume: int, duck: bool
+    report, *, project_id: str, original_volume: int, duck: bool, duck_level: str
 ) -> dict[str, Any]:
     data = store.load_project(project_id)
     pdir = store.project_dir(project_id)
@@ -131,6 +132,7 @@ def _export_video(
         out_name=f"{name}{tag}_나레이션영상.mp4",
         original_volume=original_volume,
         duck=duck,
+        duck_level=duck_level,
         output=output,
     )
 
@@ -160,6 +162,11 @@ def export_narration(project_id: str, req: NarrationExportRequest) -> dict[str, 
         if volume is None:
             volume = int(narration_settings.get("original_audio_volume", 30))
         duck = req.duck if req.duck is not None else bool(narration_settings.get("ducking"))
+        # 옛 프로젝트에는 duck_level 이 없다. 그때 쓰던 값이 곧 'normal' 이므로
+        # 없으면 normal 로 열면 결과가 예전과 같다.
+        level = req.duck_level or narration_settings.get("duck_level") or audio_mix.DUCK_DEFAULT
+        if level not in audio_mix.DUCK_LEVELS:
+            raise HTTPException(400, "덕킹 세기는 weak · normal · strong 중 하나여야 합니다.")
 
         job_id = jobs.submit(
             "render",
@@ -168,6 +175,7 @@ def export_narration(project_id: str, req: NarrationExportRequest) -> dict[str, 
             project_id=project_id,
             original_volume=volume,
             duck=duck,
+            duck_level=level,
         )
         return {"job_id": job_id}
 

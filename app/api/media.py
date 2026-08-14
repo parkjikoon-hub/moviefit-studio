@@ -14,6 +14,7 @@ from typing import Iterator
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from app.core import filmstrip
 from app.core import projects as store
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -84,6 +85,31 @@ def project_video(project_id: str, request: Request, range: str | None = Header(
     if not video_path:
         raise HTTPException(404, "이 프로젝트에는 등록된 영상이 없습니다.")
     return stream_file(Path(video_path), range)
+
+
+@router.get("/project/{project_id}/filmstrip")
+def project_filmstrip(project_id: str, request: Request, range: str | None = Header(default=None)):
+    """타임라인에 깔 '영상 띠' 그림 한 장 (화면들을 가로로 이어붙인 것).
+
+    처음 한 번만 만들고 프로젝트의 cache/ 에 저장한다. 다음부터는 즉시 나온다.
+    화면에서는 <img> 하나로 받아 타임라인 폭에 맞춰 늘려 깐다.
+    """
+    try:
+        data = store.load_project(project_id)
+        pdir = store.project_dir(project_id)
+    except store.ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    video_path = data.get("video_path")
+    if not video_path:
+        raise HTTPException(404, "이 프로젝트에는 등록된 영상이 없습니다.")
+
+    try:
+        info = filmstrip.build(video_path, pdir / "cache")
+    except filmstrip.FilmstripError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    return stream_file(info["path"], range)
 
 
 @router.get("/project/{project_id}/audio")

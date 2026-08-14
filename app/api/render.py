@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core import align, ffmpeg, framing, jobs, slideshow, stt, style_map, subtitles
+from app.core import align, audio_mix, ffmpeg, framing, jobs, slideshow, stt, style_map, subtitles
 from app.core import projects as store
 
 router = APIRouter(prefix="/api/projects", tags=["render"])
@@ -255,7 +255,7 @@ def _export_video(
             seconds=seconds,
             output=output,
         )
-    return ffmpeg.burn_subtitles(
+    result = ffmpeg.burn_subtitles(
         report,
         video_path=video_path,
         segments=segments,
@@ -264,6 +264,45 @@ def _export_video(
         out_name=out_name,
         output=output,
     )
+    return _with_background_music(report, data=data, result=result)
+
+
+def _with_background_music(report, *, data: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """배경음악이 지정되어 있으면 만들어진 영상 위에 깐다 (없으면 그대로 돌려준다).
+
+    자막은 `-vf`(화면 필터)로 새기고 소리 섞기는 `-filter_complex` 가 필요한데
+    FFmpeg 은 둘을 함께 쓰는 것을 거부한다. 그래서 두 번에 나눈다.
+    이 단계는 화면을 다시 그리지 않으므로(-c:v copy) 거의 시간이 들지 않는다.
+    """
+    music = data.get("bgm_path")
+    if not music:
+        return result
+
+    from pathlib import Path as _Path
+
+    if not _Path(music).is_file():
+        # 음악 파일이 사라졌다고 해서 이미 만든 영상을 버릴 이유는 없다. 그대로 두고 알린다.
+        result["bgm_warning"] = "배경음악 파일을 찾을 수 없어 넣지 않았습니다."
+        return result
+
+    made = _Path(result["path"])
+    with_music = made.with_name(f"{made.stem}_배경음{made.suffix}")
+    mixed = audio_mix.add_background_music(
+        report,
+        video_path=made,
+        music_path=music,
+        out_path=with_music,
+        volume=int(data.get("bgm_volume", 20)),
+    )
+    made.unlink(missing_ok=True)  # 음악 없는 중간 결과는 남길 이유가 없다
+
+    result.update({
+        "path": mixed["path"],
+        "filename": mixed["filename"],
+        "bgm": True,
+        "bgm_volume": mixed["music_volume"],
+    })
+    return result
 
 
 def _export_slideshow(

@@ -98,6 +98,44 @@ python tests/smoke_test.py    동작 점검 (서버를 켠 상태에서)
 python tools/make_icons.py    PWA 아이콘 다시 만들기
 ```
 
+### 점검 목록
+
+모두 **서버를 켠 상태에서** 하나씩 실행한다 (한꺼번에 돌리는 스크립트는 없다).
+
+| 점검 | 무엇을 보나 | 필요한 것 |
+|---|---|---|
+| `tests/smoke_test.py` | 서버 기본 기능 전반 | — |
+| `tests/guide_test.py` | 설명서 세 곳이 어긋나지 않는가 | — |
+| `tests/errors_test.py` | 잘못된 입력에 한국어로 답하는가 | — |
+| `tests/phase1_test.py` | 영상 → 자막 | 샘플 영상 |
+| `tests/phase2_test.py` | 나레이션 | 인터넷 |
+| `tests/phase3_test.py` | 편집 완성도 | 샘플 영상 |
+| `tests/phase4_test.py` | 화면비 | 샘플 영상 |
+| `tests/phase6_test.py` | 사진 영상·음원 영상·강제정렬 | 샘플 사진·음원 |
+| `tests/filmstrip_test.py` | 타임라인의 영상 띠가 실제 장면과 맞는가 | — |
+| `tests/bgm_test.py` | 배경음악이 실제로 깔리는가 | 샘플 영상 |
+| `tests/ducking_test.py` | 나레이션 구간에서 원본 소리가 줄어드는가 (세기 3단계) | 인터넷 |
+| `tests/ui_test.py` | 브라우저로 실제로 눌러 확인 | Playwright |
+| `tests/phase6_ui_test.py` | 사진·음원 화면을 눌러 확인 | Playwright |
+| `tests/shortcuts_test.py` | 단축키를 실제로 눌러 확인 | Playwright |
+| `tests/longvideo_test.py` | 30분 영상 성능과 진행률 | **오래 걸림(10~40분)** |
+
+시험용 파일은 저장소에 넣지 않는다. 없으면 만든다:
+
+```
+python tools/make_sample.py              색막대 영상 + 나레이션 견본
+python tools/make_sample_images.py       크기·색이 제각각인 사진 (--count 30)
+python tools/make_sample_speech.py       말소리가 든 영상 (인터넷 필요)
+python tools/make_sample_long.py         30분짜리 긴 영상
+```
+
+브라우저 점검을 처음 돌린다면 Playwright(브라우저를 자동으로 조작하는 도구)를 설치한다:
+
+```
+python -m pip install playwright
+python -m playwright install chromium
+```
+
 - 백엔드: Python 3.11 + FastAPI · 프론트엔드: 빌드 도구 없는 순수 HTML/CSS/JS
 - 음성인식: faster-whisper (로컬) · 나레이션: edge-tts (교체 가능한 어댑터 구조)
 - 구조와 기술 결정은 [docs/TECH_SPEC.md](docs/TECH_SPEC.md) 참고

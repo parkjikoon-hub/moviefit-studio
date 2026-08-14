@@ -359,17 +359,19 @@ def app_page(toc, body, version: str) -> str:
   <span class="guide-bar-title">사용설명서</span>
   <span class="guide-bar-hint">이 탭을 닫으면 하던 작업으로 돌아갑니다.</span>
   <span class="guide-bar-ver">버전 {version}</span>
+  <a class="guide-bar-link" href="#toc">목차</a>
+  <a class="guide-bar-link" href="#top">↑ 맨 위로</a>
 </header>
 
 <main id="main" class="guide">
 
-  <div class="guide-head">
+  <div class="guide-head" id="top">
     <h1>처음 쓰는 분을 위한 안내</h1>
     <p class="sub">설치부터 결과물을 뽑아내기까지, 화면에 보이는 순서 그대로 적었습니다.
       이 설명서는 프로그램 안에 들어 있어 인터넷 없이도 열립니다.</p>
   </div>
 
-  <nav class="toc" aria-label="목차">
+  <nav class="toc" id="toc" aria-label="목차">
     <h2>목차</h2>
     <ol>
 {toc_html(toc)}

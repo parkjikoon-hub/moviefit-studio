@@ -310,10 +310,13 @@ function renderProject() {
     $("#no-video").hidden = false;
     // 영상이 없으면 상자에 폭이 없어 글자가 세로로 쓰이므로 상자를 펼친다
     box.classList.add("is-empty");
-    $("#file-info").textContent = "파일 없음 (대본 모드)";
+    $("#file-info").textContent = "파일 없음 (나레이션 작업)";
     waveformPeaks = null;
     refreshPhotoStage();
   }
+
+  refreshFilmstrip();  // 영상이 있는 프로젝트만 띠를 깐다 (안에서 판단한다)
+  renderBgm();
 
   $("#script-input").value = project.script || "";
   updateScriptStats();
@@ -780,7 +783,7 @@ function renderSegments(filter = "") {
       <ol>
         <li>왼쪽 <b>[자막 자동 생성]</b>을 누르면 영상에서 말을 알아듣고 자막을 만듭니다.</li>
         <li>또는 위의 <b>[＋ 자막 추가]</b>로 직접 한 줄씩 넣을 수 있습니다.</li>
-        <li>대본이 있다면 상단 <b>[대본 모드]</b>에서 나레이션과 자막을 한 번에 만듭니다.</li>
+        <li>대본이 있다면 상단 <b>[나레이션 작업]</b>에서 나레이션과 자막을 한 번에 만듭니다.</li>
       </ol>`;
     list.appendChild(li);
     return;
@@ -1668,6 +1671,31 @@ function wireStylePanel() {
   $("#btn-shorts").addEventListener("click", applyShortsPreset);
 }
 
+// 덕킹 세기 — 화면에 적는 값은 tests/ducking_test.py 로 **실제로 재서** 넣는다.
+// 압축기는 나레이션이 큰지 작은지에 따라 눌리는 양이 달라지므로 "정확히 몇 %"를
+// 약속할 수 없다. 그래서 단계로 주고, 각 단계가 대략 어디쯤인지만 정직하게 적는다.
+const DUCK_HINTS = {
+  weak:   "말할 때 원본이 대략 70% 크기가 됩니다. 현장 소리를 함께 들려주고 싶을 때.",
+  normal: "말할 때 원본이 대략 37% 크기가 됩니다. 대부분 이걸로 충분합니다.",
+  strong: "말할 때 원본이 대략 22% 크기가 됩니다. 나레이션이 확실히 들려야 할 때.",
+};
+
+/** 덕킹을 켰는지에 따라 세기 단추와 볼륨 칸의 상태를 맞춘다. */
+function renderDuckUI() {
+  const on = !!project?.narration?.ducking;
+  const level = project?.narration?.duck_level || "normal";
+
+  $("#duck-strength").hidden = !on;
+  // 덕킹을 켜면 볼륨 값은 쓰이지 않는다 — 흐리게 만들어 눈으로 알린다
+  $("#origvol-field").classList.toggle("is-muted", on);
+
+  document.querySelectorAll(".duck-btn").forEach((btn) =>
+    btn.classList.toggle("is-active", btn.dataset.level === level)
+  );
+  const hint = $("#duck-hint");
+  if (hint) hint.textContent = DUCK_HINTS[level] || "";
+}
+
 // ══ 나레이션 패널 ══════════════════════════════════════════
 async function renderNarrationPanel() {
   const n = project?.narration;
@@ -1675,6 +1703,7 @@ async function renderNarrationPanel() {
     $("#tts-gap").value = n.gap ?? 0.3;
     $("#tts-origvol").value = n.original_audio_volume ?? 30;
     $("#tts-ducking").checked = !!n.ducking;
+    renderDuckUI();
     const rate = parseInt(String(n.global_rate || "+0%"), 10) || 0;
     $("#tts-rate").value = rate; $("#rate-val").textContent = `${rate >= 0 ? "+" : ""}${rate}%`;
   }
@@ -1795,7 +1824,16 @@ function wireNarrationPanel() {
 
   $("#tts-gap").addEventListener("change", (e) => { project.narration.gap = parseFloat(e.target.value) || 0; markDirty(); });
   $("#tts-origvol").addEventListener("change", (e) => { project.narration.original_audio_volume = parseInt(e.target.value, 10) || 0; markDirty(); });
-  $("#tts-ducking").addEventListener("change", (e) => { project.narration.ducking = e.target.checked; markDirty(); });
+  $("#tts-ducking").addEventListener("change", (e) => {
+    project.narration.ducking = e.target.checked;
+    renderDuckUI(); markDirty();
+  });
+  document.querySelectorAll(".duck-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      project.narration.duck_level = btn.dataset.level;
+      renderDuckUI(); markDirty();
+    })
+  );
 
   $("#btn-record-voice").addEventListener("click", () => {
     toast("내 목소리 나레이션은 엔진 검토를 마치는 대로 연결됩니다.");
@@ -2020,6 +2058,28 @@ function wireEditor() {
   $("#btn-tapsync").addEventListener("click", toggleTapSync);
   $("#btn-ab").addEventListener("click", toggleAB);
   $("#chk-wave").addEventListener("change", drawWaveform);
+  $("#chk-film").addEventListener("change", refreshFilmstrip);
+
+  // ── 배경음악 ──────────────────────────────────────────
+  $("#btn-pick-bgm").addEventListener("click", async () => {
+    try {
+      const result = await api("/api/system/pick-file?kind=audio", { method: "POST" });
+      if (result.cancelled) return;
+      project.bgm_path = result.path;
+      renderBgm(); markDirty();
+      toast("배경음악을 넣었습니다. 내보낼 때 영상에 깔립니다.");
+    } catch (err) { toast(err.message, { error: true }); }
+  });
+  $("#btn-clear-bgm").addEventListener("click", () => {
+    project.bgm_path = null;
+    renderBgm(); markDirty();
+  });
+  $("#bgm-volume").addEventListener("change", (e) => {
+    const v = parseInt(e.target.value, 10);
+    project.bgm_volume = isNaN(v) ? 20 : Math.max(0, Math.min(100, v));
+    e.target.value = project.bgm_volume;
+    markDirty();
+  });
 
   // 타임라인
   $("#tl-zoom-in").addEventListener("click", () => setZoom(pxPerSec * 1.5));
@@ -2429,7 +2489,7 @@ async function openExportDialog() {
 
     let reason = "";
     if (needsSegments && !hasSegments) reason = "먼저 자막을 만들어 주세요.";
-    else if (needsNarration && !hasNarration) reason = "먼저 [대본 모드]에서 나레이션을 만들어 주세요.";
+    else if (needsNarration && !hasNarration) reason = "먼저 [나레이션 작업]에서 나레이션을 만들어 주세요.";
     else if (needsVideo && !hasVideo) reason = "영상이 있어야 만들 수 있습니다.";
 
     btn.disabled = !!reason;
@@ -2571,7 +2631,11 @@ function wireProgressBox() {
 
 // ══ 패널 크기 조절 ═════════════════════════════════════════
 const LAYOUT_KEY = "moviefit.layout.v1";
-const LAYOUT_DEFAULT = { left: 250, right: 300, bottom: 310, timeline: 96 };
+// 영상 띠(36px)가 눈금 아래에 한 줄 더 들어가므로 기본 높이를 그만큼 키웠다.
+const LAYOUT_DEFAULT = { left: 250, right: 300, bottom: 310, timeline: 134 };
+// 영상 띠를 켤 때 이보다 낮으면 자막 막대가 들어갈 자리가 없다.
+// (눈금 22 + 띠 36 = 58, 자막 막대 51 → 109. 여유를 두어 134)
+const TIMELINE_MIN_WITH_FILM = 134;
 
 function applyLayout(layout) {
   const root = $("#view-editor");
@@ -2579,6 +2643,16 @@ function applyLayout(layout) {
   root.style.setProperty("--right-w", `${layout.right}px`);
   root.style.setProperty("--bottom-h", `${layout.bottom}px`);
   root.style.setProperty("--timeline-h", `${layout.timeline}px`);
+}
+
+/** 영상 띠를 켤 때 타임라인이 너무 낮으면 자막 막대가 눌린다. 최소한만 넓혀 준다.
+ *  예전에 쓰던 사람은 96px 로 저장해 두었기 때문에 이 보정이 없으면 트랙이 37px 로 눌린다. */
+function ensureTimelineFitsFilm() {
+  const layout = loadLayout();
+  if (layout.timeline >= TIMELINE_MIN_WITH_FILM) return;
+  layout.timeline = TIMELINE_MIN_WITH_FILM;
+  applyLayout(layout);
+  saveLayout(layout);
 }
 
 function loadLayout() {
@@ -2660,6 +2734,56 @@ function wireSplitters() {
 }
 
 // ══ 소리 파형 ══════════════════════════════════════════════
+/** 배경음악 칸 — 영상이 있는 프로젝트에서만 쓸 수 있다.
+ *  사진만 있는 프로젝트의 '음원'은 영상 길이를 정하는 주인공이라 여기서 다루지 않는다. */
+function renderBgm() {
+  const box = $("#grp-bgm");
+  if (!box) return;
+  box.hidden = !project?.video_path;
+  if (box.hidden) return;
+
+  const path = project.bgm_path || "";
+  $("#bgm-info").textContent = path || "아직 넣지 않았습니다.";
+  $("#bgm-volume").value = project.bgm_volume ?? 20;
+  $("#btn-clear-bgm").disabled = !path;
+}
+
+/** 타임라인의 영상 띠를 켜고 끈다. 영상이 없는 프로젝트에서는 아예 숨긴다. */
+function refreshFilmstrip() {
+  const img = $("#tl-film");
+  const inner = $("#tl-inner");
+  if (!img || !inner) return;
+
+  const want = $("#chk-film")?.checked !== false;
+  const has = !!project?.video_path;
+
+  if (!want || !has) {
+    img.hidden = true;
+    img.removeAttribute("src");
+    inner.classList.remove("has-film");
+    return;
+  }
+
+  const src = `/media/project/${encodeURIComponent(project.id)}/filmstrip`;
+  if (img.getAttribute("src") !== src) {
+    // 그림을 만드는 데 몇 초 걸릴 수 있다. 다 받은 뒤에 보여야 빈 칸이 깜빡이지 않는다.
+    img.hidden = true;
+    inner.classList.remove("has-film");
+    img.onload = () => {
+      img.hidden = false; inner.classList.add("has-film");
+      ensureTimelineFitsFilm();
+      drawWaveform();  // 파형 자리가 36px 내려갔으므로 다시 그린다
+    };
+    img.onerror = () => { img.hidden = true; inner.classList.remove("has-film"); };
+    img.src = src;
+  } else {
+    img.hidden = false;
+    inner.classList.add("has-film");
+    ensureTimelineFitsFilm();
+    drawWaveform();
+  }
+}
+
 async function loadWaveform() {
   if (!project?.video_path) { waveformPeaks = null; return; }
   try {
@@ -2749,7 +2873,7 @@ function toggleTapSync() {
   btn.classList.toggle("is-on", tapSyncOn);
   if (tapSyncOn) {
     if (!segments().length) {
-      toast("먼저 자막 글을 넣어 두세요. 대본 모드에서 [자막을 대본으로]의 반대로, 대본 문장을 자막으로 만들어 두면 편합니다.", { error: true });
+      toast("먼저 자막 글을 넣어 두세요. 나레이션 작업에서 [자막을 대본으로]의 반대로, 대본 문장을 자막으로 만들어 두면 편합니다.", { error: true });
       tapSyncOn = false; btn.classList.remove("is-on"); return;
     }
     selectedId = segments()[0].id;
@@ -3305,13 +3429,24 @@ function hsvToHex(h, s, v) {
   return ("#" + f(5) + f(3) + f(1)).toUpperCase();
 }
 
+// 흰색·검정처럼 **색기가 없는 색**은 '색상(Hue)'이라는 값 자체가 없다.
+// 보통은 0으로 두는데, 0은 빨강이라 색감표 전체가 새빨갛게 칠해진다.
+// 자막 기본값이 흰 글자 + 검은 외곽선이라 처음 열 때마다 붉은 판이 두 개 뜨고,
+// 그게 눈을 어지럽게 한다. 그래서 색기가 없을 때는 앱의 '하늘' 견본과 같은
+// 색상값을 쓴다 (#7CD9FF = 197도, 색상 띠에서 약 55% 지점 ≒ 가운데).
+//
+// 고른 색 자체는 바뀌지 않는다. 흰색은 그대로 #FFFFFF 다. 바뀌는 것은
+// **색감표의 바탕색과 띠 손잡이 위치**뿐이다. 색감표를 끌면 그 자리에서
+// 하늘색 계열이 나오므로 동작도 보이는 것과 어긋나지 않는다.
+const NEUTRAL_HUE = 197;
+
 function hexToHsv(hex) {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
-  if (!m) return { h: 0, s: 0, v: 1 };
+  if (!m) return { h: NEUTRAL_HUE, s: 0, v: 1 };
   const n = parseInt(m[1], 16);
   const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
-  let h = 0;
+  let h = NEUTRAL_HUE;
   if (d) {
     if (max === r) h = ((g - b) / d) % 6;
     else if (max === g) h = (b - r) / d + 2;

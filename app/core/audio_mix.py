@@ -308,9 +308,34 @@ def export_narration_audio(
 
 
 # ── 2) 영상에 나레이션 얹기 (TECH_SPEC 7절 3번, F-51) ──────
-def _mix_filter(original_volume: int, duck: bool) -> str:
+# 덕킹 세기 — 나레이션이 말할 때 원본을 얼마나 세게 누를지.
+#
+# 왜 '몇 %'가 아니라 세 단계인가:
+#   sidechaincompress 는 "기준을 넘은 만큼 비율로 눌러 주는" 장치라, 실제로 얼마나
+#   눌리는지가 **그 순간 나레이션이 얼마나 큰지**에 따라 달라진다. 화면에 30% 라고
+#   적어 두고 실제로는 25%나 40%가 되면, 지킬 수 없는 숫자를 약속한 셈이 된다.
+#   그래서 단계로 주고, 각 단계가 실제로 얼마나 누르는지는 tests/ducking_test.py 로
+#   재서 화면 안내에 적는다.
+#
+# 네 값을 함께 움직여야 단계가 실제로 벌어진다:
+#   threshold  낮을수록 작은 목소리에도 반응해 눌리는 구간이 길어진다
+#   ratio      클수록 세게 누른다
+#   release    놓아 주는 시간. **이것이 가장 크게 작용한다** — 짧으면 단어와 단어 사이마다
+#              원본이 되살아나 평균이 올라간다. threshold·ratio 만 건드렸을 때
+#              '많이'가 '보통'보다 겨우 5%p 낮았던 이유가 이것이었다 (실측).
+#   attack     누르기 시작하는 시간. 셀수록 빨리 반응해야 첫 음절이 안 튄다.
+DUCK_LEVELS = {
+    "weak":   {"threshold": 0.08, "ratio": 3,  "attack": 25, "release": 250},
+    "normal": {"threshold": 0.03, "ratio": 12, "attack": 15, "release": 400},  # 지금까지 쓰던 값
+    "strong": {"threshold": 0.01, "ratio": 20, "attack": 10, "release": 700},
+}
+DUCK_DEFAULT = "normal"
+
+
+def _mix_filter(original_volume: int, duck: bool, duck_level: str = DUCK_DEFAULT) -> str:
     """원본 소리와 나레이션을 섞는 필터그래프 문자열을 만든다. (소리 트랙이 있는 영상용)"""
     if duck:
+        level = DUCK_LEVELS.get(duck_level) or DUCK_LEVELS[DUCK_DEFAULT]
         # P2 자동 덕킹: 나레이션이 말하는 동안에만 원본 소리를 눌러 준다.
         # sidechaincompress는 '본 신호'와 '감지용 신호'의 샘플레이트·채널 배치가
         # 같아야 하므로 양쪽 모두 _COMMON_FMT로 맞춘다.
@@ -322,7 +347,9 @@ def _mix_filter(original_volume: int, duck: bool) -> str:
             f"[1:a]{_COMMON_FMT},asplit=2[nar][sckey];"
             "[sckey]apad[sc];"
             "[bg][sc]sidechaincompress="
-            "threshold=0.03:ratio=12:attack=15:release=400:makeup=1:level_sc=1[duck];"
+            f"threshold={level['threshold']}:ratio={level['ratio']}"
+            f":attack={level['attack']}:release={level['release']}"
+            ":makeup=1:level_sc=1[duck];"
             "[duck][nar]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
         )
 
@@ -337,6 +364,95 @@ def _mix_filter(original_volume: int, duck: bool) -> str:
     )
 
 
+def add_background_music(
+    report: Reporter | None = None,
+    *,
+    video_path: str | Path,
+    music_path: str | Path,
+    out_path: str | Path,
+    volume: int = 20,
+) -> dict[str, Any]:
+    """이미 만들어진 영상에 배경음악을 깐다.
+
+    인자:
+        volume : 음악을 몇 %로 깔지 (0~100). 배경이므로 기본 20%.
+
+    왜 자막을 새기는 함수 안에 넣지 않고 따로 두는가:
+        자막은 `-vf`(화면 필터)로 새기는데, 소리를 섞으려면 `-filter_complex` 가 필요하고
+        FFmpeg 은 **둘을 함께 쓰는 것을 거부한다**. 그래서 사진 영상에서 이미 검증한
+        '두 번에 나누기'를 똑같이 쓴다 (memory/fps-filter-eats-the-first-images.md).
+        여기서는 화면을 다시 그리지 않으므로(-c:v copy) 값이 거의 들지 않는다.
+
+    음악 길이 처리:
+        짧으면 영상 끝까지 **되풀이**하고, 길면 영상 길이에서 **자른다**.
+        마지막에 뚝 끊기지 않도록 끝 2초를 서서히 줄인다.
+    """
+    report = report or _noop
+    _require("ffmpeg")
+
+    source = Path(video_path)
+    music = Path(music_path)
+    if not source.is_file():
+        raise RenderError(f"영상 파일이 없습니다: {source}")
+    if not music.is_file():
+        raise RenderError(f"배경음악 파일이 없습니다: {music}")
+
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    level = max(0, min(100, int(volume))) / 100.0
+
+    report(0.05, "영상 길이를 확인하고 있습니다…")
+    try:
+        duration = measure_duration(source)
+    except ProbeError as exc:
+        raise RenderError(str(exc)) from exc
+
+    had_audio = has_audio_stream(source)
+    fade_start = max(0.0, duration - 2.0)
+
+    # aloop=loop=-1 은 '끝없이 되풀이'. size 는 되풀이할 표본 수인데 넉넉히 잡아 둔다.
+    # atrim 으로 영상 길이에 맞춰 자르고, afade 로 끝을 서서히 줄인다.
+    music_chain = (
+        f"[1:a]{_COMMON_FMT},aloop=loop=-1:size=2e9,atrim=0:{duration:.3f},asetpts=N/SR/TB,"
+        f"volume={level:.3f},afade=t=out:st={fade_start:.3f}:d=2[bgm]"
+    )
+    if had_audio:
+        graph = f"[0:a]{_COMMON_FMT}[orig];{music_chain};" \
+                "[orig][bgm]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]"
+    else:
+        # 소리 트랙이 없는 영상 — 음악만 얹는다 ([0:a] 를 쓰면 FFmpeg 이 거부한다)
+        graph = music_chain.replace("[bgm]", "[a]")
+
+    tmp = out.with_name(f".{out.stem}.tmp{out.suffix}")
+    tmp.unlink(missing_ok=True)
+
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-i", str(source),
+        "-i", str(music),
+        "-filter_complex", graph,
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy",           # 화면은 손대지 않는다 — 빠르고 화질도 그대로다
+        "-c:a", "aac", "-b:a", "192k",
+        "-t", f"{duration:.3f}",
+        str(tmp),
+    ]
+    _run_with_progress(cmd, duration, report, "배경음악을 넣고 있습니다", base=0.10)
+
+    if not tmp.is_file():
+        raise RenderError("배경음악을 넣지 못했습니다. 음악 파일 형식을 확인해 주세요.")
+    tmp.replace(out)
+
+    report(1.0, "완료되었습니다.")
+    return {
+        "path": str(out),
+        "filename": out.name,
+        "duration": duration,
+        "had_audio": had_audio,
+        "music_volume": int(level * 100),
+    }
+
+
 def mix_narration_into_video(
     report: Reporter | None = None,
     *,
@@ -346,6 +462,7 @@ def mix_narration_into_video(
     out_name: str = "나레이션영상.mp4",
     original_volume: int = 30,
     duck: bool = False,
+    duck_level: str = DUCK_DEFAULT,
     output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """영상에 나레이션 오디오를 얹어 새 mp4를 만든다 (F-51).
@@ -410,7 +527,7 @@ def mix_narration_into_video(
     if had_audio:
         # 소리를 섞을 때는 filter_complex를 쓰므로 화면 필터도 같은 자리에 함께 넣어야 한다.
         # (-filter_complex 와 -vf 를 동시에 쓰면 FFmpeg이 거부한다.)
-        graph = _mix_filter(volume_pct, duck)
+        graph = _mix_filter(volume_pct, duck, duck_level)
         if reframe:
             graph += f";[0:v]{frame['filter']}[v]"
         cmd += ["-filter_complex", graph, "-map", "[v]" if reframe else "0:v", "-map", "[a]"]
@@ -466,6 +583,7 @@ def mix_narration_into_video(
         "elapsed": round(elapsed, 2),
         "had_audio": had_audio,
         "ducked": bool(duck),
+        "duck_level": duck_level if duck else None,
         "original_volume": volume_pct,
         "width": frame["width"],
         "height": frame["height"],
