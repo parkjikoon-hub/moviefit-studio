@@ -32,6 +32,29 @@ FastAPI 는 모르는 필드를 기본적으로 무시한다.
        예) 잘못된 duck_level 을 보내 400 이 오는지 (옛 코드는 200 을 준다)
     5) 사용자에게 브라우저 Ctrl+F5 를 안내 (브라우저도 옛 파일을 들고 있다)
 
+## 새 패키지가 필요하면 — 설치본에는 **pip 이 없다** (2026-08-15)
+
+`pillow` 를 새로 쓰게 되어 설치본에 넣어야 했는데 `python -m pip` 이 안 된다.
+`tools/build_installer.py` 가 payload 를 만든 뒤 pip·setuptools·wheel 을 **일부러
+지우기** 때문이다(159행 — 설치 파일 크기를 줄이려고).
+
+**개발 파이썬의 pip 으로 설치본 폴더에 직접 넣으면 된다:**
+
+    python -m pip install --target "<설치폴더>\python\Lib\site-packages" pillow
+
+⚠ **두 파이썬의 버전이 같을 때만** 쓸 수 있다. 확인하고 하라 —
+컴파일된 부품(`.pyd`)은 3.11 용과 3.12 용이 다르다. 이번에는 둘 다 3.11.9 였다.
+
+    python -c "import sys; print(sys.version)"
+    & "<설치폴더>\python\python.exe" -c "import sys; print(sys.version)"
+
+넣은 뒤에는 **설치본 파이썬으로 직접 불러** 확인한다. 개발 환경에서 되는 것은
+아무 증거가 아니다:
+
+    & "<설치폴더>\python\python.exe" -c "from PIL import Image; print('ok')"
+
+`numpy` 는 손댈 필요가 없었다 — 음성인식 부품이 이미 함께 깔아 둔다.
+
 ## 왜 중요한가
 
 **둘 다 오류가 나지 않는다.** ①은 "고쳤는데 안 된다"는 소모적인 대화를 만들고,
