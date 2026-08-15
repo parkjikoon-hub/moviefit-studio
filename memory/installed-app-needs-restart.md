@@ -55,6 +55,27 @@ FastAPI 는 모르는 필드를 기본적으로 무시한다.
 
 `numpy` 는 손댈 필요가 없었다 — 음성인식 부품이 이미 함께 깔아 둔다.
 
+## 설치 파일로 덮어쓸 때는 **개발 서버(8766)도 꺼야 한다** (2026-08-15)
+
+설치 프로그램은 `AppMutex=MovieFitStudioRunning` 으로 "프로그램이 켜져 있는지"를
+본다. 이 표시는 `app/__main__.py` 가 남기는 것이라 **포트와 무관하다.** 그래서
+8765 를 껐어도 **개발 서버 8766 이 떠 있으면 설치가 통째로 막힌다.**
+
+    설치 종료코드 1   ← "Setup failed to initialize" 로 보이지만 실제 원인은 이것
+    로그: Defaulting to Cancel for suppressed message box … "MovieFit Studio 가 지금 실행 중입니다"
+
+`/VERYSILENT /SUPPRESSMSGBOXES` 로 돌리면 안내창이 안 뜨고 **Cancel 로 처리**되어
+원인이 안 보인다. 조용한 설치가 1로 끝나면 `/LOG=<경로>` 를 붙여 다시 돌려라 —
+로그 마지막 몇 줄에 이유가 그대로 적혀 있다.
+
+설치 전에 두 포트를 모두 확인한다:
+
+    Get-NetTCPConnection -LocalPort 8765,8766 -State Listen |
+      ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+
+**`projects/` 는 덮어쓰기 설치로 사라지지 않는다** (확인함: 설치 전후 17개 그대로).
+설치 프로그램은 payload 를 덮어쓰기만 하고 모르는 파일은 건드리지 않는다.
+
 ## 왜 중요한가
 
 **둘 다 오류가 나지 않는다.** ①은 "고쳤는데 안 된다"는 소모적인 대화를 만들고,

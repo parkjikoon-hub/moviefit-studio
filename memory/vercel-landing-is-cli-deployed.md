@@ -24,10 +24,27 @@ CLI 가 마지막에 "Promote to production: vercel deploy --prod --cwd landing"
 알려 주는데, 이 줄을 놓치면 올렸다고 믿고 끝낸다. 운영에 올라가면 출력에
 `Production  https://...` 와 `Aliased  https://moviefit-studio.vercel.app` 두 줄이 같이 나온다.
 
+**`--cwd` 는 CLI 58 에서 아예 막혔다 (2026-08-15, v0.6.0 배포).**
+`vercel deploy --prod --cwd landing` 이 `{"status":"error","message":"Not authorized"}`
+로 죽었다. 로그인은 멀쩡했고(`vercel whoami` → parkjikoon-hub), 같은 CLI 로
+`vercel project ls` 는 잘 됐으며 moviefit-studio 도 목록에 있었다. **권한 문제가
+아니라 `--cwd` 처리 문제였다** — 폴더 안에서 그냥 돌리니 한 번에 됐다:
+
+    Push-Location landing; vercel deploy --prod; Pop-Location
+
+CLI 는 성공 출력에도 `"when": "Promote to production"` 이 적힌 `next` 목록을 늘
+붙인다. **그 줄만 보고 미리보기라고 단정하지 말 것.** 운영에 올라갔는지는 아래
+주소 확인으로만 가른다.
+
 확인하는 방법 (이것 없이 완료라고 말하지 말 것):
 
     python -c "import urllib.request; t=urllib.request.urlopen('https://moviefit-studio.vercel.app/guide').read().decode('utf-8'); print(len(t))"
     # 로컬 landing/guide.html 의 글자 수와 같아야 한다
+
+⚠ **글자 수를 그냥 비교하면 안 맞는다.** 사이트가 주는 파일은 `\r\n` 인데,
+파이썬이 로컬 파일을 글자 모드로 읽으면 `\r` 을 떼어 버린다. 그래서 **줄 수만큼**
+(이번에는 627자) 사이트 쪽이 더 많게 나오고, 배포가 안 된 것처럼 보인다.
+양쪽을 `.replace('\r\n','\n')` 로 맞춘 뒤 비교하라. 맞추면 글자 하나까지 같다.
 
 첫 페이지의 내려받기 단추는 `releases/latest/download/MovieFitStudio-Setup.exe` 를 가리키므로
 **버전을 손으로 고칠 필요가 없다.** 릴리스를 만들면 자동으로 새것을 가리킨다
