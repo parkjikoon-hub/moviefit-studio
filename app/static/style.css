@@ -712,16 +712,47 @@ body.is-resizing .splitter { pointer-events: auto; }
 }
 
 /* 소리 파형 — 말이 시작하고 끝나는 지점을 눈으로 보게 해 준다 */
-.tl-wave { position: absolute; left: 0; top: 22px; height: calc(100% - 22px); display: block; opacity: .55; pointer-events: none; }
+.tl-wave { position: absolute; left: 0; top: 22px; height: calc(100% - 22px - 34px); display: block; opacity: .55; pointer-events: none; }
 
 /* 영상 띠가 켜지면 그만큼(36px) 아래 것들이 내려간다.
    눈금 22px + 띠 36px = 58px */
-.tl-inner.has-film .tl-wave { top: 58px; height: calc(100% - 58px); }
-.tl-inner.has-film .tl-track { height: calc(100% - 58px); }
+.tl-inner.has-film .tl-wave { top: 58px; height: calc(100% - 58px - 34px); }
+/* 효과 띠(34px)만큼도 함께 빼야 한다. 안 빼면 자막 띠가 그대로라 효과 띠가
+   타임라인 **바깥으로 밀려나** 아래에 있는 단추 위에 놓이고, 그 단추가 마우스를
+   가로채 막대를 끌 수 없게 된다. 오류는 나지 않는다 — 실제로 겪었다
+   (memory/verify-ui-by-actually-clicking.md 의 z-index 사고와 같은 종류). */
+.tl-inner.has-film .tl-track { height: calc(100% - 58px - 34px); }
 .tl-inner.has-film .tl-ab { top: 58px; }
 
-.tl-track { position: relative; height: calc(100% - 22px); background:
+/* 자막 띠는 위, 화면 효과 띠는 그 아래 한 줄. 효과 띠는 높이를 고정으로 잡고
+   자막 띠가 남는 자리를 갖는다 (효과가 없어도 자리는 비워 둔다 — 있다는 것을 알려야 한다). */
+.tl-track { position: relative; height: calc(100% - 22px - 34px); background:
   repeating-linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,.03) 39px 40px); cursor: crosshair; }
+
+.tl-fx-track { position: relative; height: 34px; border-top: 1px solid var(--line);
+  background: rgba(255,255,255,.02); }
+.tl-fx-track .tl-empty { font-size: 12px; opacity: .55; padding: 8px 10px; }
+.tl-fx {
+  position: absolute; top: 4px; height: 24px;
+  background: rgba(96,165,250,.28); border: 1px solid #60A5FA;
+  border-radius: 2px; overflow: hidden; cursor: grab;
+  display: flex; align-items: center; padding: 0 6px;
+  font-size: 11.5px; color: #DBEAFE; font-weight: 600; white-space: nowrap;
+}
+.tl-fx:hover { filter: brightness(1.15); }
+.tl-fx.is-active { background: rgba(96,165,250,.55); box-shadow: 0 0 0 2px rgba(147,197,253,.45); }
+.tl-fx .grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.tl-fx .grip-l { left: 0; } .tl-fx .grip-r { right: 0; }
+
+/* 화면 효과 패널 */
+.fx-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.fx-kinds button { flex: 1 1 auto; padding: 8px 10px; font-size: 13px; }
+.fx-selected { margin-top: 10px; padding: 10px; border: 1px solid var(--line);
+  border-radius: 4px; background: rgba(255,255,255,.03); }
+.fx-sel-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 8px; font-weight: 600; }
+.fx-strength { flex: 1; padding: 7px 4px; font-size: 12.5px; }
+.fx-strength.is-active { background: var(--accent); color: var(--cream-ink); }
 
 /* A-B 구간 반복 표시 */
 .tl-ab { position: absolute; top: 22px; bottom: 0; background: rgba(251,191,36,.16); border-left: 2px solid var(--warn); border-right: 2px solid var(--warn); pointer-events: none; z-index: 2; }

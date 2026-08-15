@@ -252,8 +252,8 @@ try:
               f"{round(win['x'])} → {round(moved['x'])}")
 
         # 막대와 틀이 같은 값을 가리키는가
-        slider_val = float(page.input_value("#aspect-focus"))
-        check("옆의 [잘라낼 자리] 막대도 같은 값을 가리킨다",
+        slider_val = float(page.input_value("#aspect-focus-x"))
+        check("옆의 [가로 위치] 막대도 같은 값을 가리킨다",
               abs(slider_val - focus_after) < 1.5, f"막대 {slider_val} vs 설정 {focus_after}")
 
         # ══ 미리보기의 자막이 실제 내보내기와 같은 자리인가 ══════

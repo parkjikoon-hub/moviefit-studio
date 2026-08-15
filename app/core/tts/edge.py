@@ -14,7 +14,17 @@ import io
 import re
 from typing import Any
 
-from app.core.tts.base import Synthesis, TTSEngine, TTSError, Voice
+from app.core.tts.base import (
+    LANGUAGE_NAMES,
+    Synthesis,
+    TTSEngine,
+    TTSError,
+    Voice,
+    has_hangul,
+    language_name,
+    language_of,
+)
+from app.core.tts.base import speaks_korean as _speaks_korean
 
 # 화면에 보기 좋은 한국어 이름
 _KOREAN_LABELS = {
@@ -23,12 +33,8 @@ _KOREAN_LABELS = {
     "ko-KR-HyunsuMultilingualNeural": "현수 · 남성 · 부드럽고 다국어 가능",
 }
 
-_LOCALE_NAMES = {
-    "ko": "한국어", "en": "영어", "ja": "일본어", "zh": "중국어", "es": "스페인어",
-    "fr": "프랑스어", "de": "독일어", "it": "이탈리아어", "pt": "포르투갈어",
-    "ru": "러시아어", "vi": "베트남어", "th": "태국어", "id": "인도네시아어",
-    "hi": "힌디어", "ar": "아랍어",
-}
+# 언어 이름표는 base.py 한 곳에서만 관리한다 (두 벌로 갈라지면 한쪽만 늘어난다)
+_LOCALE_NAMES = LANGUAGE_NAMES
 
 
 def _pretty_name(short_name: str) -> str:
@@ -125,6 +131,33 @@ class EdgeTTSEngine(TTSEngine):
         self._voices = voices
         return voices
 
+    # ── 실패 원인 설명 ───────────────────────────────────
+    @staticmethod
+    def _explain_failure(exc: Exception | None, text: str, voice: str) -> str:
+        """실패를 사용자가 고칠 수 있는 말로 바꾼다.
+
+        가장 흔한 원인은 인터넷이 아니라 **언어 불일치**다. 프랑스어 목소리에게
+        한국어 글을 주면 마이크로소프트 서버가 소리를 하나도 돌려주지 않는다
+        (NoAudioReceived). 전에는 이것까지 "인터넷 연결을 확인하세요"로 안내해서,
+        인터넷이 멀쩡한 사람이 될 때까지 다시 누르게 만들었다.
+        """
+        detail = f"(상세: {type(exc).__name__})" if exc is not None else "(상세: 소리가 비어 있음)"
+
+        if has_hangul(text) and not _speaks_korean(voice):
+            lang = language_name(language_of(voice))
+            return (
+                f"이 목소리는 {lang} 전용이라 한국어를 읽지 못합니다.\n"
+                "목소리 목록에서 위쪽의 '한국어 가능' 목소리를 골라 주세요. "
+                "(이름에 Multilingual 이 붙은 목소리는 한국어를 읽습니다)\n"
+                f"{detail}"
+            )
+
+        return (
+            "나레이션을 만들지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요. "
+            "계속 실패하면 목소리를 다른 것으로 바꿔 보세요.\n"
+            f"{detail}"
+        )
+
     # ── 음성 생성 ────────────────────────────────────────
     async def synthesize(
         self, text: str, voice: str, rate: str = "+0%", pitch: str = "+0Hz", volume: str = "+0%"
@@ -148,15 +181,12 @@ class EdgeTTSEngine(TTSEngine):
                 if chunk["type"] == "audio":
                     buffer.write(chunk["data"])
         except Exception as exc:
-            raise TTSError(
-                "나레이션을 만들지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요. "
-                "계속 실패하면 목소리를 다른 것으로 바꿔 보세요.\n"
-                f"(상세: {type(exc).__name__})"
-            ) from exc
+            raise TTSError(self._explain_failure(exc, text, voice)) from exc
 
         audio = buffer.getvalue()
         if not audio:
-            raise TTSError("나레이션 결과가 비어 있습니다. 목소리를 바꿔서 다시 시도해 주세요.")
+            # 예외 없이 조용히 빈 소리가 오는 경우도 있다. 원인은 위와 같으므로 같은 설명을 쓴다.
+            raise TTSError(self._explain_failure(None, text, voice))
 
         # 길이는 반드시 실측한다 (D1 동기화 정확도가 여기서 나온다)
         from app.core.ffprobe import measure_duration_bytes

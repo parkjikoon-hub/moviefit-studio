@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import PROJECTS_DIR
-from app.core import framing, style_map
+from app.core import effects, framing, style_map
 
 PROJECT_FILE = "project.json"
 SCHEMA_VERSION = 1
@@ -128,6 +128,9 @@ def default_project(
         "style": style_map.apply_preset("basic"),
         # 내보낼 때의 화면비 (롱폼·숏폼). 기본은 원본 그대로라 옛 프로젝트와 동작이 같다.
         "output": output,
+        # 화면 효과 막대. **비어 있는 것이 기본이다** — 아무 효과도 미리 넣지 않는다.
+        # 사용자가 타임라인에 막대를 놓아야만 생긴다 (app/core/effects.py).
+        "effects": [],
         "narration": {
             "gap": 0.3,
             "voice": "ko-KR-SunHiNeural",
@@ -256,6 +259,10 @@ def save_project(project_id: str, data: dict[str, Any]) -> dict[str, Any]:
     data["id"] = project_id
     data["version"] = SCHEMA_VERSION
     data["updated_at"] = _now_iso()
+    # 화면 효과 막대는 사용자가 보낸 값이므로 저장 직전에 한 번 거른다. 영상 길이는
+    # 여기서 모르므로(사진 영상은 원본 영상이 없다) 길이 자르기는 렌더링 때 한 번 더 한다.
+    if "effects" in data:
+        data["effects"] = effects.normalize(data.get("effects"))
 
     target = pdir / PROJECT_FILE
     tmp = pdir / (PROJECT_FILE + ".tmp")

@@ -340,11 +340,24 @@
                     title="원본 전체를 넣고 남는 곳을 채웁니다. 아무것도 잘리지 않지만 가운데 영상이 작아집니다">여백 채우기</button>
           </div>
 
+          <!-- 확대는 잘라내기·여백 채우기 두 방식 모두에서 뜻이 통한다 -->
+          <label class="field">확대 <span id="zoom-val" class="val">1.0배</span>
+            <input id="aspect-zoom" type="range" min="0.5" max="2" step="0.05" value="1"
+                   title="1보다 크면 영상을 당겨 크게 담고, 작으면 뒤로 물려 작게 담습니다. 출력 크기는 변하지 않습니다">
+          </label>
+          <p id="zoom-warn" class="hint hint-warn" hidden>
+            ⚠ 이 배율에서는 원본 화소가 모자라 <b>화면이 흐려집니다.</b>
+          </p>
+
           <div id="crop-options">
-            <label class="field">잘라낼 자리 <span id="focus-val" class="val">가운데</span>
-              <input id="aspect-focus" type="range" min="0" max="100" step="1" value="50">
+            <label class="field">가로 위치 <span id="focus-x-val" class="val">가운데</span>
+              <input id="aspect-focus-x" type="range" min="0" max="100" step="1" value="50">
             </label>
-            <p class="hint">미리보기 화면의 <b>밝은 틀을 마우스로 끌어서</b> 옮길 수도 있습니다.</p>
+            <label class="field">세로 위치 <span id="focus-y-val" class="val">가운데</span>
+              <input id="aspect-focus-y" type="range" min="0" max="100" step="1" value="50">
+            </label>
+            <p class="hint">미리보기 화면의 <b>밝은 틀을 마우스로 끌어서</b> 옮길 수도 있습니다.
+              움직일 자리가 없는 쪽은 <b>흐리게</b> 보입니다 — <b>확대</b>를 올리면 살아납니다.</p>
           </div>
 
           <div id="pad-options" hidden>
@@ -361,6 +374,38 @@
                 title="세로 화면에 맞게 자막 크기·줄바꿈·위치를 한 번에 맞춥니다">
           📱 자막도 세로 화면에 맞게 한 번에 맞추기
         </button>
+          </div>
+        </div>
+
+        <!-- 화면 효과 — 사용자가 구간을 정해서 건다 -->
+        <div class="grp"><h3>화면 효과</h3>
+          <div class="grp-body">
+            <p class="hint">넣고 싶은 효과를 누르면 <b>지금 재생 위치</b>에 막대가 하나 생깁니다.
+              막대는 아래 타임라인에서 <b>끌어서 옮기고 양 끝을 잡아 길이를 바꿉니다.</b>
+              여러 개 놓아도 되고 겹쳐도 됩니다.</p>
+
+            <div id="fx-kinds" class="fx-kinds" role="group" aria-label="넣을 화면 효과"></div>
+
+            <div id="fx-selected" class="fx-selected" hidden>
+              <div class="fx-sel-head">
+                <span id="fx-sel-name">—</span>
+                <button id="fx-delete" class="btn btn-tiny" title="고른 효과 막대를 지웁니다">지우기</button>
+              </div>
+              <div class="row-2">
+                <label class="field">시작(초) <input id="fx-start" type="number" min="0" step="0.1"></label>
+                <label class="field">끝(초) <input id="fx-end" type="number" min="0" step="0.1"></label>
+              </div>
+              <div class="fit-row" role="group" aria-label="효과 세기">
+                <button class="fx-strength" data-strength="low">약하게</button>
+                <button class="fx-strength" data-strength="medium">보통</button>
+                <button class="fx-strength" data-strength="high">많이</button>
+              </div>
+            </div>
+
+            <p id="fx-slow-warn" class="hint hint-warn" hidden>
+              ⚠ 화면 효과를 넣으면 만드는 데 <b>몇 배 더 걸립니다.</b>
+              화면을 픽셀 단위로 다시 그리기 때문입니다.
+            </p>
           </div>
         </div>
 
@@ -571,7 +616,7 @@
     <!-- 타임라인 띠 -->
     <div class="timeline-wrap">
       <div class="tl-side">
-        <span class="tl-label">자막 트랙</span>
+        <span class="tl-label">자막 · 효과 트랙</span>
         <div class="tl-zoom">
           <button id="tl-zoom-out" class="btn btn-icon" title="축소">－</button>
           <button id="tl-zoom-in" class="btn btn-icon" title="확대">＋</button>
@@ -588,6 +633,8 @@
           <img id="tl-film" class="tl-film" alt="" hidden>
           <canvas id="tl-wave" class="tl-wave"></canvas>
           <div id="tl-track" class="tl-track"></div>
+          <!-- 화면 효과 막대. 자막 띠 바로 아래에 한 줄 더 둔다 -->
+          <div id="tl-fx-track" class="tl-fx-track"></div>
           <div id="tl-ab" class="tl-ab" hidden></div>
           <div id="tl-playhead" class="tl-playhead"></div>
         </div>

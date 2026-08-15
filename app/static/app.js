@@ -334,6 +334,7 @@ function renderProject() {
 function renderAll() {
   renderSegments();
   renderTimelineAll();
+  syncFxPanel();
   applyOverlayStyle();
   updateOverlay($("#player").currentTime || 0);
 }
@@ -1231,8 +1232,215 @@ function renderTimeline() {
 /** 타임라인을 다시 그린 뒤에는 파형과 구간 반복 표시도 함께 맞춰 준다. */
 function renderTimelineAll() {
   renderTimeline();
+  renderFxTrack();
   drawWaveform();
   renderABRegion();
+}
+
+// ══ 화면 효과 띠 (사용자가 구간을 정해서 건다) ═══════════════
+//
+// 관통 원칙: **아무 효과도 미리 넣지 않는다.** 사용자가 막대를 놓아야만 생긴다.
+// 저장 구조와 필터는 서버의 app/core/effects.py 가 단일 출처이고, 여기는 그 목록을
+// 그리고 고치기만 한다. 세기 값이나 배율 같은 것을 화면에 두 벌 두지 않는다.
+
+let fxKinds = [];        // 서버가 알려 준 효과 종류 목록
+let fxSelectedId = null; // 지금 고른 막대
+
+function fxList() {
+  if (!project) return [];
+  if (!Array.isArray(project.effects)) project.effects = [];
+  return project.effects;
+}
+
+async function loadFxKinds() {
+  try {
+    const data = await api("/api/system/effect-kinds");
+    fxKinds = data.kinds || [];
+  } catch {
+    fxKinds = [];   // 목록을 못 받아도 나머지 화면은 그대로 동작해야 한다
+  }
+  renderFxKindButtons();
+}
+
+function renderFxKindButtons() {
+  const box = $("#fx-kinds");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!fxKinds.length) {
+    box.innerHTML = '<p class="hint">효과 목록을 불러오지 못했습니다. F5로 새로고침해 주세요.</p>';
+    return;
+  }
+  for (const kind of fxKinds) {
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = `＋ ${kind.label}`;
+    btn.title = kind.hint || "";
+    btn.addEventListener("click", () => addFxBar(kind.kind));
+    box.appendChild(btn);
+  }
+}
+
+/** 지금 재생 위치에 막대를 하나 놓는다. 기본 길이는 3초. */
+function addFxBar(kind) {
+  if (!project) { toast("먼저 영상을 열어 주세요.", { error: true }); return; }
+  const total = totalDuration() || 0;
+  const now = Math.round(($("#player").currentTime || 0) * 10) / 10;
+  const start = clamp(now, 0, Math.max(0, total - 0.5));
+  const end = total > 0 ? Math.min(total, start + 3) : start + 3;
+  if (end - start < 0.2) {
+    toast("영상 끝이라 효과를 놓을 자리가 없습니다. 재생 위치를 앞으로 옮겨 주세요.", { error: true });
+    return;
+  }
+  snapshot();
+  // id 는 서버가 저장할 때 다시 매긴다. 여기서는 화면에서 고르기 위한 임시 이름이다.
+  const id = `fx-${Date.now()}`;
+  fxList().push({ id, kind, start, end, strength: "medium", params: {} });
+  fxSelectedId = id;
+  renderTimelineAll(); syncFxPanel(); markDirty();
+  const label = (fxKinds.find((k) => k.kind === kind) || {}).label || kind;
+  toast(`${label}를 ${fmtTime(start)}부터 ${fmtTime(end)}까지 넣었습니다. 막대를 끌어 옮길 수 있습니다.`);
+}
+
+function renderFxTrack() {
+  const track = $("#tl-fx-track");
+  if (!track) return;
+  track.innerHTML = "";
+  const bars = fxList();
+  if (!bars.length) {
+    const empty = document.createElement("div");
+    empty.className = "tl-empty";
+    empty.textContent = "화면 효과 자리입니다. 왼쪽 [화면 효과]에서 고르면 여기에 막대로 놓입니다.";
+    track.appendChild(empty);
+    return;
+  }
+  for (const bar of bars) {
+    const el = document.createElement("div");
+    el.className = "tl-fx";
+    el.dataset.id = bar.id;
+    if (bar.id === fxSelectedId) el.classList.add("is-active");
+    el.style.left = bar.start * pxPerSec + "px";
+    el.style.width = Math.max(14, (bar.end - bar.start) * pxPerSec) + "px";
+    const kind = fxKinds.find((k) => k.kind === bar.kind) || {};
+    const strength = { low: "약하게", medium: "보통", high: "많이" }[bar.strength] || bar.strength;
+    el.title = `${kind.label || bar.kind} · ${strength}\n${fmtTime(bar.start)} → ${fmtTime(bar.end)}\n`
+             + "끌어서 옮기고, 양 끝을 끌어 길이를 바꿉니다.";
+
+    const label = document.createElement("span");
+    label.textContent = kind.label || bar.kind;
+    el.appendChild(label);
+
+    const gl = document.createElement("div"); gl.className = "grip grip-l";
+    const gr = document.createElement("div"); gr.className = "grip grip-r";
+    el.append(gl, gr);
+
+    el.addEventListener("mousedown", (e) => startFxDrag(e, bar, el));
+    el.addEventListener("click", (e) => { e.stopPropagation(); fxSelectedId = bar.id; renderFxTrack(); syncFxPanel(); });
+    track.appendChild(el);
+  }
+}
+
+/** 막대를 끌어 옮기거나 길이를 바꾼다 (자막 막대와 같은 규칙). */
+function startFxDrag(e, bar, el) {
+  e.preventDefault();
+  const mode = e.target.classList.contains("grip-l") ? "left"
+             : e.target.classList.contains("grip-r") ? "right" : "move";
+  const startX = e.clientX;
+  const orig = { start: bar.start, end: bar.end };
+  const total = totalDuration() || Infinity;
+  let moved = false;
+
+  const onMove = (ev) => {
+    const deltaSec = (ev.clientX - startX) / pxPerSec;
+    if (Math.abs(ev.clientX - startX) > 2) moved = true;
+    if (mode === "move") {
+      const span = orig.end - orig.start;
+      let next = Math.round((orig.start + deltaSec) * 10) / 10;
+      next = clamp(next, 0, Math.max(0, total - span));
+      bar.start = next; bar.end = next + span;
+    } else if (mode === "left") {
+      bar.start = clamp(Math.round((orig.start + deltaSec) * 10) / 10, 0, orig.end - 0.2);
+    } else {
+      bar.end = clamp(Math.round((orig.end + deltaSec) * 10) / 10, orig.start + 0.2, total);
+    }
+    el.style.left = bar.start * pxPerSec + "px";
+    el.style.width = Math.max(14, (bar.end - bar.start) * pxPerSec) + "px";
+  };
+
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+    if (!moved) return;
+    // 자막 막대와 같은 방식 — 되돌림점은 **바꾸기 전** 값으로 남긴다
+    const after = { start: bar.start, end: bar.end };
+    bar.start = orig.start; bar.end = orig.end;
+    snapshot();
+    bar.start = after.start; bar.end = after.end;
+    fxSelectedId = bar.id;
+    renderTimelineAll(); syncFxPanel(); markDirty();
+  };
+
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
+}
+
+/** 고른 막대의 값을 패널에 맞춘다. */
+function syncFxPanel() {
+  const box = $("#fx-selected");
+  const bars = fxList();
+  const bar = bars.find((b) => b.id === fxSelectedId) || null;
+  if (box) box.hidden = !bar;
+
+  const warn = $("#fx-slow-warn");
+  if (warn) warn.hidden = bars.length === 0;
+
+  if (!bar) return;
+  const kind = fxKinds.find((k) => k.kind === bar.kind) || {};
+  const name = $("#fx-sel-name");
+  if (name) name.textContent = kind.label || bar.kind;
+  const startBox = $("#fx-start"), endBox = $("#fx-end");
+  if (startBox) startBox.value = bar.start;
+  if (endBox) endBox.value = bar.end;
+  $$(".fx-strength").forEach((b) => b.classList.toggle("is-active", b.dataset.strength === bar.strength));
+}
+
+function wireFxPanel() {
+  for (const [id, key] of [["#fx-start", "start"], ["#fx-end", "end"]]) {
+    const box = $(id);
+    if (!box) continue;
+    box.addEventListener("change", () => {
+      const bar = fxList().find((b) => b.id === fxSelectedId);
+      if (!bar) return;
+      const value = Math.round((parseFloat(box.value) || 0) * 10) / 10;
+      snapshot();
+      if (key === "start") bar.start = clamp(value, 0, bar.end - 0.2);
+      else bar.end = Math.max(bar.start + 0.2, value);
+      renderTimelineAll(); syncFxPanel(); markDirty();
+    });
+  }
+
+  $$(".fx-strength").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const bar = fxList().find((b) => b.id === fxSelectedId);
+      if (!bar) return;
+      snapshot();
+      bar.strength = btn.dataset.strength;
+      renderTimelineAll(); syncFxPanel(); markDirty();
+    });
+  });
+
+  const del = $("#fx-delete");
+  if (del) del.addEventListener("click", () => {
+    const bars = fxList();
+    const at = bars.findIndex((b) => b.id === fxSelectedId);
+    if (at < 0) return;
+    snapshot();
+    bars.splice(at, 1);
+    fxSelectedId = null;
+    renderTimelineAll(); syncFxPanel(); markDirty();
+    toast("효과 막대를 지웠습니다.");
+  });
+
+  loadFxKinds();
 }
 
 function startClipDrag(e, seg, clip) {
@@ -1781,9 +1989,10 @@ async function previewVoice(voiceId, button) {
     const res = await fetch("/api/tts/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // 견본 문장은 보내지 않는다 — 서버가 그 목소리의 **언어에 맞는** 문장을 고른다.
+      // 한국어 문장을 고정으로 보내면 한국어를 못 읽는 목소리가 소리를 하나도 안 준다.
       body: JSON.stringify({
         voice: voiceId,
-        text: "안녕하세요. 이 목소리로 나레이션을 만들어 드립니다.",
         rate: rateString(),
       }),
     });
@@ -2157,6 +2366,7 @@ function wireEditor() {
   wireStylePanel();
   wirePhotoPanel();
   wireAspectPanel();
+  wireFxPanel();
   wireNarrationPanel();
   wireDictionary();
   wireCoach();
@@ -2968,7 +3178,9 @@ const FR_ASPECTS = { "16:9": [16, 9], "9:16": [9, 16], "1:1": [1, 1] };
 const FR_ASPECT_LABELS = {
   source: "원본 그대로", "16:9": "가로 16:9", "9:16": "세로 9:16", "1:1": "정사각 1:1",
 };
-const FR_DEFAULT = { aspect: "source", fit: "crop", focus_x: 50, focus_y: 50, pad_blur: true };
+const FR_DEFAULT = { aspect: "source", fit: "crop", focus_x: 50, focus_y: 50, pad_blur: true, zoom: 1 };
+// 확대 한계. framing.py 의 ZOOM_MIN/ZOOM_MAX 와 같은 값이어야 한다.
+const FR_ZOOM_MIN = 0.5, FR_ZOOM_MAX = 2.0;
 
 // 0.5는 언제나 위로. 파이썬 쪽 _round() 와 같은 규칙이다 (파이썬 기본 round는 다르게 동작한다).
 const frRound = (v) => Math.floor(v + 0.5);
@@ -2984,10 +3196,15 @@ function normalizeOutput(output) {
     const n = parseFloat(v);
     return Number.isFinite(n) ? Math.round(clamp(n, 0, 100) * 100) / 100 : 50;
   };
+  const zn = parseFloat(src.zoom);
+  const zoom = Number.isFinite(zn)
+    ? Math.round(clamp(zn, FR_ZOOM_MIN, FR_ZOOM_MAX) * 1000) / 1000
+    : 1;
   return {
     aspect, fit,
     focus_x: pct(src.focus_x), focus_y: pct(src.focus_y),
     pad_blur: src.pad_blur !== false,
+    zoom,
   };
 }
 
@@ -2997,30 +3214,42 @@ function resolveFraming(srcWidth, srcHeight, output) {
   const srcW = Math.trunc(srcWidth), srcH = Math.trunc(srcHeight);
   if (!(srcW > 0) || !(srcH > 0)) throw new Error("원본 영상 크기가 올바르지 않습니다.");
 
-  if (conf.aspect === "source") {
-    return { width: frEven(srcW), height: frEven(srcH), changed: false,
-             aspect: "source", fit: conf.fit, crop: null };
+  const zoom = conf.zoom;
+  const evenSrcW = frEven(srcW), evenSrcH = frEven(srcH);
+
+  // 화면비도 안 바꾸고 확대도 안 하면 손댈 것이 없다 (옛 프로젝트가 여기로 온다).
+  if (conf.aspect === "source" && zoom === 1) {
+    return { width: evenSrcW, height: evenSrcH, changed: false,
+             aspect: "source", fit: conf.fit, crop: null, zoom: 1, sharpness: 1 };
   }
 
-  const [rw, rh] = FR_ASPECTS[conf.aspect];
-  const targetRatio = rw / rh;
+  // "원본 그대로"에 확대만 거는 경우, 목표 화면비는 원본 화면비와 같다.
+  let targetRatio;
+  if (conf.aspect === "source") targetRatio = srcW / srcH;
+  else { const [rw, rh] = FR_ASPECTS[conf.aspect]; targetRatio = rw / rh; }
   const sourceRatio = srcW / srcH;
 
   if (conf.fit === "crop") {
-    let cropW, cropH;
-    if (sourceRatio > targetRatio) { cropH = srcH; cropW = srcH * targetRatio; }
-    else { cropW = srcW; cropH = srcW / targetRatio; }
+    // 확대 없이 잘라낼 때의 크기. 이것이 곧 출력 크기이며 확대해도 변하지 않는다.
+    let baseW, baseH;
+    if (sourceRatio > targetRatio) { baseH = srcH; baseW = srcH * targetRatio; }
+    else { baseW = srcW; baseH = srcW / targetRatio; }
+    const outW = frEven(baseW), outH = frEven(baseH);
 
-    const outW = frEven(cropW), outH = frEven(cropH);
-    let offX = frRound((srcW - outW) * conf.focus_x / 100);
-    let offY = frRound((srcH - outH) * conf.focus_y / 100);
-    offX = clamp(offX, 0, Math.max(0, srcW - outW));
-    offY = clamp(offY, 0, Math.max(0, srcH - outH));
+    // 원본에서 실제로 보이는 영역 = 출력 크기 ÷ 확대.
+    const visW = frEven(outW / zoom), visH = frEven(outH / zoom);
+    const cropW = Math.min(visW, evenSrcW), cropH = Math.min(visH, evenSrcH);
 
-    const changed = outW !== frEven(srcW) || outH !== frEven(srcH);
-    return { width: outW, height: outH, changed,
+    let offX = frRound((srcW - cropW) * conf.focus_x / 100);
+    let offY = frRound((srcH - cropH) * conf.focus_y / 100);
+    offX = clamp(offX, 0, Math.max(0, srcW - cropW));
+    offY = clamp(offY, 0, Math.max(0, srcH - cropH));
+
+    const cropped = cropW !== evenSrcW || cropH !== evenSrcH;
+    return { width: outW, height: outH, changed: zoom !== 1 ? true : cropped,
              aspect: conf.aspect, fit: "crop",
-             crop: { x: offX, y: offY, w: outW, h: outH } };
+             crop: { x: offX, y: offY, w: cropW, h: cropH },
+             zoom, sharpness: Math.round((cropW / outW) * 1000) / 1000 };
   }
 
   // 여백 채우기 — 원본의 긴 변을 새 틀의 긴 변으로 삼는다 (framing.py 의 설명 참고)
@@ -3029,8 +3258,19 @@ function resolveFraming(srcWidth, srcHeight, output) {
   if (targetRatio >= 1) { outW = frEven(longSide); outH = frEven(longSide / targetRatio); }
   else { outH = frEven(longSide); outW = frEven(longSide * targetRatio); }
 
-  const changed = outW !== frEven(srcW) || outH !== frEven(srcH);
-  return { width: outW, height: outH, changed, aspect: conf.aspect, fit: "pad", crop: null };
+  // 틀 안에 원본 전체가 들어가도록 줄인 크기 (확대 없을 때).
+  let fitW, fitH;
+  if (sourceRatio > outW / outH) { fitW = outW; fitH = frEven(outW / sourceRatio); }
+  else { fitH = outH; fitW = frEven(outH * sourceRatio); }
+
+  if (zoom === 1) {
+    const changed = outW !== evenSrcW || outH !== evenSrcH;
+    return { width: outW, height: outH, changed, aspect: conf.aspect, fit: "pad", crop: null,
+             zoom: 1, sharpness: Math.round((srcW / fitW) * 1000) / 1000 };
+  }
+  const zoomW = frEven(fitW * zoom);
+  return { width: outW, height: outH, changed: true, aspect: conf.aspect, fit: "pad", crop: null,
+           zoom, sharpness: Math.round((srcW / zoomW) * 1000) / 1000 };
 }
 
 /** 프로젝트에 저장된 화면비 설정 (없으면 기본값). */
@@ -3269,32 +3509,39 @@ function syncAspectInputs() {
   if (cropOpts) cropOpts.hidden = conf.fit !== "crop";
   if (padOpts) padOpts.hidden = conf.fit !== "pad";
 
-  // 잘라낼 자리 막대는 여유가 있는 축을 조절한다 (가로로 넓으면 좌우, 세로로 길면 위아래)
+  // 위치 막대는 **가로·세로 두 개**다. 확대를 하면 두 축 모두 움직일 자리가 생기므로
+  // 막대 하나로 축을 골라 쓰던 옛 방식은 한쪽 축을 잠가 버린다 (오류 없이 안 움직인다).
   const dims = sourceDimensions();
-  const slider = $("#aspect-focus");
-  if (slider && dims) {
-    const frame = resolveFraming(dims.w, dims.h, conf);
-    const vertical = frame.fit === "crop" && frame.crop && (dims.h - frame.crop.h) > 0;
-    slider.value = String(vertical ? conf.focus_y : conf.focus_x);
-    const label = $("#focus-val");
-    if (label) {
-      const v = Number(slider.value);
-      const words = vertical
-        ? (v <= 15 ? "위쪽" : v >= 85 ? "아래쪽" : v === 50 ? "가운데" : `위에서 ${v}%`)
-        : (v <= 15 ? "왼쪽" : v >= 85 ? "오른쪽" : v === 50 ? "가운데" : `왼쪽에서 ${v}%`);
-      label.textContent = words;
-    }
+  const zoomSlider = $("#aspect-zoom");
+  const frame = dims ? resolveFraming(dims.w, dims.h, conf) : null;
+
+  if (zoomSlider) zoomSlider.value = String(conf.zoom);
+  const zoomLabel = $("#zoom-val");
+  if (zoomLabel) zoomLabel.textContent = `${conf.zoom.toFixed(2).replace(/0$/, "")}배`;
+  const zoomWarn = $("#zoom-warn");
+  // 원본 화소가 출력의 3/4 아래로 떨어지면 눈에 띄게 흐려진다
+  // (실측: 1280×720 을 9:16 으로 1.6배 당기면 선명도가 41% 떨어진다).
+  if (zoomWarn) zoomWarn.hidden = !frame || (frame.sharpness ?? 1) >= 0.75;
+
+  for (const axis of ["x", "y"]) {
+    const slider = $(`#aspect-focus-${axis}`);
+    if (!slider) continue;
+    const value = axis === "x" ? conf.focus_x : conf.focus_y;
+    slider.value = String(value);
+    // 움직일 자리가 없으면 흐리게 해서 "왜 안 움직이는지"가 보이게 한다.
+    const slack = !frame || !frame.crop ? 0
+      : (axis === "x" ? dims.w - frame.crop.w : dims.h - frame.crop.h);
+    slider.disabled = slack <= 0;
+    const label = $(`#focus-${axis}-val`);
+    if (!label) continue;
+    if (slack <= 0) { label.textContent = "움직일 자리 없음"; continue; }
+    label.textContent = axis === "x"
+      ? (value <= 15 ? "왼쪽" : value >= 85 ? "오른쪽" : value === 50 ? "가운데" : `왼쪽에서 ${value}%`)
+      : (value <= 15 ? "위쪽" : value >= 85 ? "아래쪽" : value === 50 ? "가운데" : `위에서 ${value}%`);
   }
+
   const blur = $("#aspect-pad-blur");
   if (blur) blur.checked = conf.pad_blur;
-}
-
-/** 지금 화면비에서 잘라낼 자리를 조절하는 축이 세로인지. */
-function focusAxisIsVertical() {
-  const dims = sourceDimensions();
-  if (!dims) return false;
-  const frame = resolveFraming(dims.w, dims.h, currentOutput());
-  return frame.fit === "crop" && !!frame.crop && (dims.h - frame.crop.h) > 0;
 }
 
 function wireAspectPanel() {
@@ -3310,14 +3557,24 @@ function wireAspectPanel() {
     btn.addEventListener("click", () => setOutput({ fit: btn.dataset.fit }));
   });
 
-  const slider = $("#aspect-focus");
-  if (slider) {
-    // 끄는 동안에는 되돌림점을 만들지 않는다. 한 번 끌 때마다 Ctrl+Z가 백 번 필요해진다.
+  // 끄는 동안에는 되돌림점을 만들지 않는다. 한 번 끌 때마다 Ctrl+Z가 백 번 필요해진다.
+  for (const axis of ["x", "y"]) {
+    const slider = $(`#aspect-focus-${axis}`);
+    if (!slider) continue;
     slider.addEventListener("input", () => {
       const v = clamp(parseFloat(slider.value) || 0, 0, 100);
-      setOutput(focusAxisIsVertical() ? { focus_y: v } : { focus_x: v }, { snap: false });
+      setOutput(axis === "x" ? { focus_x: v } : { focus_y: v }, { snap: false });
     });
     slider.addEventListener("change", () => snapshot());
+  }
+
+  const zoomSlider = $("#aspect-zoom");
+  if (zoomSlider) {
+    zoomSlider.addEventListener("input", () => {
+      const v = clamp(parseFloat(zoomSlider.value) || 1, FR_ZOOM_MIN, FR_ZOOM_MAX);
+      setOutput({ zoom: v }, { snap: false });
+    });
+    zoomSlider.addEventListener("change", () => snapshot());
   }
 
   const blur = $("#aspect-pad-blur");

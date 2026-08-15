@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from app.core import framing, style_map
+from app.core import effects, framing, style_map
 from app.core.fonts import fonts_dir_for_ffmpeg
 from app.core.jobs import JobCancelled
 
@@ -142,6 +142,52 @@ def video_dimensions(path: str | Path) -> tuple[int, int]:
     if width <= 0 or height <= 0:
         raise RenderError("영상 화면 크기가 올바르지 않습니다.")
     return width, height
+
+
+def video_fps(path: str | Path, fallback: float = 30.0) -> float:
+    """영상의 초당 프레임 수.
+
+    화면 효과(zoompan)가 이 값을 **반드시** 알아야 한다. 안 알려 주면 FFmpeg 이 기본값
+    25 를 써서 **10초짜리 영상이 12초로 늘어난다** (실측). 소리와 어긋나는 조용한 사고다.
+
+    잴 수 없으면 fallback 을 돌려준다 — 효과를 못 걸게 막는 것보다 낫고, 대부분의
+    영상이 30fps 다.
+    """
+    _require("ffprobe")
+    src = Path(path)
+    if not src.is_file():
+        raise RenderError(f"영상 파일이 없습니다: {src}")
+
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate,avg_frame_rate",
+        "-of", "json",
+        str(src),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=60)
+    if result.returncode != 0:
+        return fallback
+
+    try:
+        stream = json.loads(result.stdout)["streams"][0]
+    except (KeyError, IndexError, ValueError, json.JSONDecodeError):
+        return fallback
+
+    # "30000/1001" 처럼 분수로 온다. avg 가 0/0 인 파일이 있어 r_frame_rate 를 먼저 본다.
+    for key in ("r_frame_rate", "avg_frame_rate"):
+        text = str(stream.get(key) or "")
+        if "/" not in text:
+            continue
+        top, _, bottom = text.partition("/")
+        try:
+            value = float(top) / float(bottom)
+        except (ValueError, ZeroDivisionError):
+            continue
+        if 1.0 <= value <= 240.0:
+            return round(value, 3)
+    return fallback
 
 
 # ── 1) 오디오 추출 (TECH_SPEC 7절 1번) ─────────────────────
@@ -401,6 +447,7 @@ def burn_subtitles(
     seconds: float | None = None,
     fast: bool = False,
     output: dict[str, Any] | None = None,
+    effects_list: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """영상에 자막을 새겨 넣어 새 mp4를 만든다 (TECH_SPEC 7절 2번, F-50).
 
@@ -458,8 +505,17 @@ def burn_subtitles(
     # fontsdir로 번들 폰트 폴더를 알려 주지 않으면 한글이 네모(□)로 나온다 (R4).
     workdir, ass_arg, fonts_arg = _filter_paths(ass_path)
     subtitle_filter = f"ass={ass_arg}:fontsdir={fonts_arg}"
+
+    # 화면 효과는 **잘라내기 뒤, 자막 앞**에 온다.
+    #   · 잘라내기 뒤인 이유: 효과를 출력 크기(더 작다)에만 걸면 되어 빠르다.
+    #   · 자막 앞인 이유: 효과가 자막 위에 오면 글자가 가려 읽기 어려워진다.
+    effect_filter = effects.build_filter(
+        effects.normalize(effects_list, duration=target_duration),
+        width, height, video_fps(source),
+    )
+
     # 자르기가 먼저, 자막이 나중이다. 순서가 반대면 방금 새긴 자막이 잘려 나간다.
-    video_filter = framing.chain(frame["filter"], subtitle_filter)
+    video_filter = framing.chain(frame["filter"], effect_filter, subtitle_filter)
 
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(source)]
     if seconds:
@@ -515,6 +571,7 @@ def render_preview(
     seconds: float = 10.0,
     out_name: str = "미리보기.mp4",
     output: dict[str, Any] | None = None,
+    effects_list: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """앞부분 몇 초만 자막을 넣어 빠르게 만들어 본다 (F-54).
 
@@ -532,4 +589,5 @@ def render_preview(
         seconds=seconds,
         fast=True,
         output=output,
+        effects_list=effects_list,
     )

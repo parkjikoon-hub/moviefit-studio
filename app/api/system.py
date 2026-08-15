@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app import __version__
 from app.config import AUDIO_EXTS, IMAGE_EXTS, MEDIA_EXTS
-from app.core import filedialog, framing
+from app.core import effects, filedialog, framing
 from app.core import projects as store
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -98,10 +98,23 @@ def open_folder(req: OpenFolderRequest) -> dict[str, Any]:
     return {"opened": str(target)}
 
 
+@router.get("/effect-kinds")
+def effect_kinds() -> dict[str, Any]:
+    """화면에 보여 줄 효과 종류 목록 (이름·설명·세기 단계).
+
+    효과를 새로 만들면 `app/core/effects.py` 의 등록표에만 더하면 되고, 이 API 와
+    화면은 손대지 않아도 목록에 나타난다.
+    """
+    return {"kinds": effects.kind_list(),
+            "strengths": [{"value": s, "label": effects.STRENGTH_LABELS[s]}
+                          for s in effects.STRENGTHS]}
+
+
 @router.get("/framing")
 def framing_preview(
     w: int, h: int, aspect: str = "source", fit: str = "crop",
     focus_x: float = 50.0, focus_y: float = 50.0, pad_blur: bool = True,
+    zoom: float = 1.0,
 ) -> dict[str, Any]:
     """원본 크기와 설정을 주면 최종 출력 크기·자르는 영역을 돌려준다 (F-C).
 
@@ -115,6 +128,7 @@ def framing_preview(
         return framing.resolve(w, h, {
             "aspect": aspect, "fit": fit,
             "focus_x": focus_x, "focus_y": focus_y, "pad_blur": pad_blur,
+            "zoom": zoom,
         })
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -239,6 +239,8 @@ def _export_video(
     # 출력 화면비 (F-C). 파일 이름에도 남겨서 가로본과 세로본을 눈으로 구별할 수 있게 한다.
     output = framing.normalize(data.get("output"))
     tag = "" if output["aspect"] == "source" else f"_{output['aspect'].replace(':', '-')}"
+    # 화면 효과 막대. 비어 있으면 지금까지와 똑같은 경로로 간다 (느려지지도 않는다).
+    effects_list = data.get("effects") or []
 
     out_dir = store.project_dir(project_id) / "out"
     base = _safe_name(data)
@@ -254,6 +256,7 @@ def _export_video(
             out_name=out_name,
             seconds=seconds,
             output=output,
+            effects_list=effects_list,
         )
     result = ffmpeg.burn_subtitles(
         report,
@@ -263,6 +266,7 @@ def _export_video(
         out_dir=out_dir,
         out_name=out_name,
         output=output,
+        effects_list=effects_list,
     )
     return _with_background_music(report, data=data, result=result)
 

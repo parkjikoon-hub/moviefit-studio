@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.core import tts as tts_mod
-from app.core.tts.base import TTSError
+from app.core.tts.base import TTSError, sample_text_for
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
 
@@ -44,7 +44,7 @@ async def get_voices(korean_only: bool = False) -> dict[str, Any]:
 
 class PreviewRequest(BaseModel):
     voice: str
-    text: str = "안녕하세요. 이 목소리로 나레이션을 만들어 드립니다."
+    text: str | None = None  # 비우면 그 목소리의 언어에 맞는 견본을 서버가 고른다
     rate: str = "+0%"
     pitch: str = "+0Hz"
     volume: str = "+0%"
@@ -52,8 +52,12 @@ class PreviewRequest(BaseModel):
 
 @router.post("/preview")
 async def preview(req: PreviewRequest) -> Response:
-    """목소리 미리듣기 — 짧은 문장을 즉시 소리로 만들어 돌려준다 (F-41)."""
-    text = req.text.strip()[:200]  # 미리듣기는 짧게 (경계에서만 검증)
+    """목소리 미리듣기 — 짧은 문장을 즉시 소리로 만들어 돌려준다 (F-41).
+
+    문장을 안 보내면 **그 목소리의 언어로** 된 견본을 쓴다. 한국어 문장을 고정으로
+    보내면 한국어를 못 읽는 목소리(322개 중 307개)가 전부 실패한다.
+    """
+    text = (req.text or sample_text_for(req.voice)).strip()[:200]
     if not text:
         raise HTTPException(400, "미리들을 문장이 비어 있습니다.")
 
