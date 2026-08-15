@@ -21,7 +21,10 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any, Callable
+
+from app.core import fxart
 
 STRENGTHS = ("low", "medium", "high")
 STRENGTH_LABELS = {"low": "약하게", "medium": "보통", "high": "많이"}
@@ -169,6 +172,16 @@ def _fall(height: int, speed: float) -> str:
     return f"'{height}-mod(t*{speed}\\,{height})'"
 
 
+def _thickness(base: float, params: dict[str, Any]) -> float:
+    """덧씌우는 그림을 얼마나 진하게 얹을 것인가 — 사용자가 정한 진하기를 곱한다.
+
+    빗줄기·눈송이는 흰 그림을 `screen` 으로 얹으므로 이 값이 곧 진하기다.
+    1을 넘으면 가장 밝은 자리는 더 못 밝아지지만(자의 끝), 흐림 때문에 생긴
+    중간 밝기의 자리들은 계속 진해지므로 200%까지도 실제로 달라진다.
+    """
+    return round(base * max(0.0, float(params["opacity"]) / 100.0), 4)
+
+
 def _layer_rain(
     bars: list[dict[str, Any]], width: int, height: int, fps: float
 ) -> list[tuple[str, str]]:
@@ -190,7 +203,7 @@ def _layer_rain(
             + f",scale={width}:{3 * height}:flags=neighbor"
             + ",gblur=sigma=0.8:sigmaV=3.0"          # 모서리만 살짝 눅인다
             + f",crop={width}:{height}:0:{_fall(height, speed)}"
-            + f",lutyuv=y='val*{spec['opacity']}'",
+            + f",lutyuv=y='val*{_thickness(spec['opacity'], params)}'",
             _enable(group),
             "screen",
         ))
@@ -230,7 +243,7 @@ def _layer_snow(
                 + f",crop={width}:{height}"
                   f":'{(canvas - width) // 2}+{sway}*sin(2*PI*{round(hertz * pace, 4)}*t)'"
                   f":{_fall(height, round(speed * pace, 1))}"
-                + f",lutyuv=y='val*{round(spec['opacity'] * dim, 4)}'",
+                + f",lutyuv=y='val*{_thickness(spec['opacity'] * dim, params)}'",
                 gate,
                 "screen",
             ))
@@ -240,18 +253,75 @@ def _layer_snow(
 # ── 색을 바꾸는 효과 · 자리를 정하는 효과 ────────────────────
 
 
-def _build_look(bars: list[dict[str, Any]], width: int, height: int, fps: float) -> str:
-    """등록표에 **필터 문자열을 그대로 적어 둔** 효과들을 만든다.
+def _neutral(name: str, key: str) -> float:
+    """그 값에 대해 **아무 일도 안 하는 값**.
 
-    색감 프리셋과 비네트처럼 "세기마다 정해진 모양"이 있는 것들이다. 계산으로
-    풀어 쓰지 않고 세기별 필터를 등록표에 직접 적는다 — 무엇이 걸리는지 한눈에
-    보이고, 값을 손보려면 그 줄만 고치면 된다.
+    진하기(투명 정도)를 계산하려면 "0 이 중립"인지 "1 이 중립"인지를 알아야 한다.
+    필터마다 다르다 — `eq` 의 채도·대비는 1 이 원래대로이고, `colorbalance` 의
+    붉은기는 0 이 원래대로다. `colorchannelmixer` 는 **단위행렬**(자기 색은 1,
+    남의 색은 0)이 원래대로다.
+    """
+    if name == "eq":
+        return 0.0 if key == "brightness" else 1.0
+    if name == "hue":
+        return 1.0                                    # s=1 이 원래 색
+    if name == "colorchannelmixer":
+        return 1.0 if key in ("rr", "gg", "bb", "aa") else 0.0
+    return 0.0                                        # colorbalance · vignette 의 a
+
+
+# FFmpeg 이 받아 주는 범위. 사용자가 진하기를 끝까지 밀어도 필터가 거부하지 않도록
+# 여기서 자른다 (외부 도구를 부르는 자리는 시스템 경계다).
+_LOOK_RANGE = {
+    "eq": (0.0, 3.0),
+    "hue": (0.0, 10.0),
+    "vignette": (0.0, 1.55),                          # a 의 최대는 PI/2 ≒ 1.5708
+    "colorbalance": (-1.0, 1.0),
+    "colorchannelmixer": (-2.0, 2.0),
+}
+
+
+def look_filters(kind: str, strength: str, opacity: float = 100.0) -> list[str]:
+    """색감 계열의 **숫자 설명서**를 실제 FFmpeg 필터 문자열로 바꾼다.
+
+    등록표에는 `("eq", {"saturation": 1.04})` 처럼 필터 이름과 값만 적어 둔다.
+    문자열을 그대로 적어 두면 사람이 읽기는 좋지만 **진하기를 곱할 수가 없다** —
+    사용자가 슬라이더로 정한 만큼 값을 키우거나 줄이려면 숫자여야 한다.
+
+    진하기는 이렇게 계산한다:
+
+        새 값 = 중립값 + (등록표에 적힌 값 - 중립값) × 진하기
+
+    진하기 0% 면 아무 일도 안 하고, 100% 면 등록표 그대로, 200% 면 효과가 두 배가
+    된다. **세기 3단계 사이의 비율은 그대로 보존된다** — 모든 단계에 같은 배수를
+    곱하기 때문이다 (memory/effects-must-not-obscure-the-picture.md 의 "비율을
+    유지한 채 사다리 전체를 옮긴다"와 같은 셈).
+    """
+    factor = max(0.0, float(opacity) / 100.0)
+    made: list[str] = []
+    for name, values in KINDS[kind]["strengths"][strength]["look"]:
+        low, high = _LOOK_RANGE[name]
+        parts = []
+        for key, value in values.items():
+            base = _neutral(name, key)
+            now = min(high, max(low, base + (value - base) * factor))
+            parts.append(f"{key}={round(now, 4)}")
+        made.append(f"{name}=" + ":".join(parts))
+    return made
+
+
+def _build_look(bars: list[dict[str, Any]], width: int, height: int, fps: float) -> str:
+    """등록표에 **값을 적어 둔** 색감·비네트 효과들을 만든다.
+
+    "세기마다 정해진 모양"이 있는 것들이다. 계산으로 풀어 쓰지 않고 세기별 값을
+    등록표에 직접 적는다 — 무엇이 걸리는지 한눈에 보이고, 값을 손보려면 그 줄만
+    고치면 된다. 진하기 슬라이더는 `look_filters()` 가 반영한다.
     """
     kind = bars[0]["kind"]
     parts: list[str] = []
-    for strength, _params, group in _by_setting(bars):
+    for strength, params, group in _by_setting(bars):
         gate = _enable(group)
-        for one in KINDS[kind]["strengths"][strength]["look"]:
+        for one in look_filters(kind, strength, params["opacity"]):
             parts.append(f"{one}:enable='{gate}'")
     return ",".join(parts)
 
@@ -344,28 +414,47 @@ def _build_box_mark(
 def _layer_spotlight(
     bars: list[dict[str, Any]], width: int, height: int, fps: float
 ) -> list[tuple[str, str, str]]:
-    """주변 어둡게 — 가운데만 밝은 그림을 만들어 **곱하기**로 합성한다.
+    """주변 어둡게 — **검은 그림을 알파(투명도)로** 얹는다. 가운데는 투명하게 둔다.
 
-    곱하기는 `screen` 의 반대다. 그림이 255면 그대로 두고, 낮으면 그만큼 어두워진다.
     그림은 시간에 따라 변하지 않으므로 **작게 그려서 늘린다** — `geq` 는 픽셀마다
     식을 계산해 느린데, 작은 자에서만 쓰면 부담이 없고 늘리면 저절로 부드러워진다.
+
+    ⚠ 처음에는 회색 그림을 **밝기 면에만 곱했다.** 오류는 없었고 점검 804개가 전부
+    통과했지만 **화면이 보라색으로 물들었다.** 밝기(Y)만 줄이고 색차(U·V)를 그대로
+    두면 '밝기에 견준 색'이 그만큼 커지기 때문이다 — 빨강과 파랑의 차이는
+    `1.402(V-128) + 1.772(U-128)` 이라 **Y 와 아무 상관이 없다.** 실측(색이 있는 화면):
+
+        밝기만 곱하기 · 기본값     남은 밝기 65% · 색의 진하기 **150%**  ❌
+        밝기만 곱하기 · 진하기 200% 남은 밝기 34% · 색의 진하기 **218%**  ❌
+        검은 그림을 알파로 얹기     남은 밝기 71% · 색의 진하기 **101%**  ✅
+
+    알파 합성은 색차도 함께 데려간다: `U_새 = U*(1-a) + 128*a = 128 + (U-128)*(1-a)`.
+    어두워지는 만큼 색도 함께 옅어져 실제 사진처럼 보인다. 구간 밖이 원본과 한 값도
+    다르지 않은 것은 그대로다(실측 0개).
+
+    비·눈은 지금대로 밝기 면만 얹는다 — 흰 그림을 **밝히는** 쪽이라 색이 튀지 않는다.
     """
     made: list[tuple[str, str, str]] = []
     for strength, params, group in _by_setting(bars):
+        # 진하기는 **어두워지는 정도**에 곱한다. dim 자체에 곱하면 진하기를 올릴수록
+        # 밝아지는 거꾸로 된 손잡이가 된다.
         dim = KINDS["spotlight"]["strengths"][strength]["dim"]
+        dim = round(max(0.0, 1.0 - (1.0 - dim) * max(0.0, params["opacity"] / 100.0)), 4)
         small_w = 160
         small_h = _even_up(small_w * height / width)
         cx = round(small_w * params["x"] / 100.0, 2)
         cy = round(small_h * params["y"] / 100.0, 2)
         radius = round(max(6.0, small_w * params["size"] / 100.0), 2)
         made.append((
-            f"scale={small_w}:{small_h},"
-            f"geq=lum='255*({dim}+{round(1 - dim, 4)}"
-            f"*exp(-1.6*pow(hypot((X-{cx})/{radius}\\,(Y-{cy})/{radius})\\,2)))'"
-            f":cb=128:cr=128,"
+            # 밝기는 16(검정), 색은 128(무채색)으로 고정하고 **알파만** 그린다.
+            # 알파 = 1 - 남길 비율 이므로 가운데는 0(완전 투명)이다.
+            f"scale={small_w}:{small_h},format=yuva420p,"
+            f"geq=lum=16:cb=128:cr=128:"
+            f"a='255*(1-({dim}+{round(1 - dim, 4)}"
+            f"*exp(-1.6*pow(hypot((X-{cx})/{radius}\\,(Y-{cy})/{radius})\\,2))))',"
             f"scale={width}:{height}:flags=bicubic",
             _enable(group),
-            "multiply",
+            "alpha",
         ))
     return made
 
@@ -377,11 +466,151 @@ def _slider(label: str, default: float, low: float, high: float,
             "step": step, "default": default, "suffix": suffix}
 
 
+# ── 파이썬이 그린 그림을 쓰는 효과 (물방울·비눗방울·작은 폭죽) ──────
+#
+# 앞의 13종과 다른 점은 하나뿐이다: **그림 파일이 먼저 있어야 한다.**
+# 그래서 이 갈래의 함수만 `folder`(그림을 둘 폴더)를 더 받는다.
+# 필터에는 **파일 이름만** 넣는다 — FFmpeg 이 그 폴더에서 실행되기 때문이다
+# (memory/ffmpeg-filter-path-escaping.md: 절대 경로를 넣으면 콜론에서 깨진다).
+
+
+# 그림 파일의 0~255 를 필터 안에서 되살린다. 이것을 안 붙이면 '안 밂'(128)이
+# 126 으로 들어와 온 화면이 밀린다 (아래 _art_water_drops 설명 참고).
+_MAP_SCALE = "format=yuv420p,lutyuv=y='(val-minval)*255/(maxval-minval)'"
+
+
+def _art_water_drops(bars: list[dict[str, Any]], width: int, height: int,
+                     fps: float, folder: Path) -> list[str]:
+    """물방울 맺힘 — 굴절 지도로 화면을 휘게 하고 반짝임을 얹는다.
+
+    `displace` 는 지도의 밝기를 '얼마나 밀 것인가'로 읽는다. 방울 안쪽만 밀고
+    바깥은 128(=안 밂) 그대로이므로 **방울이 없는 자리는 원본 그대로** 남는다.
+
+    ⚠ 지도를 그대로 넘기면 **온 화면이 2픽셀씩 밀린다.** 그림 파일의 밝기는
+    0~255 인데 필터 안으로 들어오면 16~235 로 눌리기 때문이다. 그래서 128 로
+    그린 '안 밂'이 필터 안에서는 126 이 되어 화면 전체가 어긋난다. 실측으로
+    방울 10개짜리가 **화면의 71%** 를 건드렸고, 세기를 올려도 71% 그대로였다
+    (온 화면이 밀리는 것이 방울보다 훨씬 컸기 때문이다).
+
+        지도를 통째로 128 로 채우고 재기 — 다른 값이 0이어야 정상
+          그대로 넘김              663,681개  ❌
+          lutyuv 로 자를 되돌림          0개  ✅
+
+    비·눈이 문턱값에서 겪은 것과 **똑같은 함정**이다
+    (memory/ffmpeg-effect-layer-traps.md ③-c). 거기서 쓴 해법을 그대로 쓴다:
+    필터 안의 자(minval·maxval)로 원래 범위를 되돌린다.
+    """
+    parts: list[str] = []
+    for index, (strength, params, group) in enumerate(_by_setting(bars)):
+        spec = KINDS["water_drops"]["strengths"][strength]
+        tag = fxart.stamp("water_drops", strength, params, width, height)
+        art = fxart.draw_water_drops(folder, tag, width, height,
+                                     spec["count"], params["size"] / 100.0)
+        gate = _enable(group)
+        key = f"wd{index}"
+        parts.append(
+            # null 로 지금까지의 흐름에 이름을 붙인다. 이름이 없으면 displace 의
+            # 첫 입력으로 넘길 수 없다 (사슬 중간에서는 입력 이름을 못 적는다).
+            f"null[{key}];"
+            f"movie={art['x']},{_MAP_SCALE}[{key}x];"
+            f"movie={art['y']},{_MAP_SCALE}[{key}y];"
+            f"[{key}][{key}x][{key}y]displace=edge=smear:enable='{gate}'[{key}d];"
+            f"movie={art['shine']}[{key}s];"
+            f"[{key}d][{key}s]overlay=0:0:enable='{gate}'"
+        )
+    return parts
+
+
+def _art_bubbles(bars: list[dict[str, Any]], width: int, height: int,
+                 fps: float, folder: Path) -> list[str]:
+    """비눗방울 — 고리 그림을 겹치고 **자리를 시간식으로** 올린다.
+
+    비·눈처럼 잘라내는 창을 움직이지 않는다. 그러면 알파(투명)가 죽어 방울
+    너머로 화면이 안 비친다. 대신 `overlay` 의 자리를 움직인다.
+
+    그림은 세로로 두 겹이고 자리는 0 ~ -H 를 오간다. 되돌아갈 때 위아래가 같은
+    그림이라 방울이 깜빡이지 않는다.
+
+    ⚠ 자리를 **빼야** 방울이 올라간다. 화면의 한 줄 r 에 보이는 것은 그림의 (r - y)
+    줄이므로, y 가 커지면 그림이 아래로 흐른다. 처음에 `-H + mod(...)` 로 적어
+    **비눗방울이 가라앉았다** — 초당 72픽셀로 내려가는 것을 점검이 잡았다.
+    비가 하늘로 솟았던 것과 같은 종류의 실수다 (`_fall` 설명 참고).
+    """
+    parts: list[str] = []
+    for index, (strength, params, group) in enumerate(_by_setting(bars)):
+        spec = KINDS["bubbles"]["strengths"][strength]
+        tag = fxart.stamp("bubbles", strength, params, width, height)
+        sway = max(8, int(min(width, height) * 0.035))
+        name = fxart.draw_bubbles(folder, tag, width, height, spec["count"],
+                                  params["size"] / 100.0 * spec["swell"], sway)
+        pace = params["speed"] / 100.0
+        rise = round(spec["rise"] * pace, 1)
+        hertz = round(0.11 * pace, 4)
+        gate = _enable(group)
+        key = f"bb{index}"
+        parts.append(
+            f"null[{key}];movie={name}[{key}i];"
+            f"[{key}][{key}i]overlay="
+            f"x='-{sway}+{sway}*sin(2*PI*{hertz}*t)'"
+            f":y='-mod(t*{rise}\\,{height})'"
+            f":enable='{gate}'"
+        )
+    return parts
+
+
+def _art_fireworks(bars: list[dict[str, Any]], width: int, height: int,
+                   fps: float, folder: Path) -> list[str]:
+    """작은 폭죽 — 장면을 이어 붙인 그림을 **넘겨 가며** 보여 준다.
+
+    막대마다 따로 얹는다. 폭죽은 **막대가 시작할 때 터져야** 하는데, 설정이 같은
+    막대끼리 묶어 한 번에 얹으면 시작 시각이 하나뿐이라 나머지는 터지다 만 장면부터
+    보이게 된다. 그림 파일은 설정이 같으면 같은 것을 다시 쓴다.
+
+    `loop` 로 만든 흐름은 끝이 없으므로 `shortest=1` 을 반드시 붙인다. 안 붙이면
+    렌더가 끝나지 않는다 (memory/ffmpeg-effect-layer-traps.md ④).
+    """
+    parts: list[str] = []
+    slot = 0
+    for strength, params, group in _by_setting(bars):
+        spec = KINDS["fireworks"]["strengths"][strength]
+        cell = max(48, _even_down(min(width, height) * params["size"] / 100.0))
+        tag = fxart.stamp("fireworks", strength, {**params, "cell": cell}, width, height)
+        name = fxart.draw_fireworks(folder, tag, cell, spec["sparks"], spec["glow"])
+        left = _even_down(min(max(0.0, width * params["x"] / 100.0 - cell / 2),
+                              max(0.0, width - cell)))
+        top = _even_down(min(max(0.0, height * params["y"] / 100.0 - cell / 2),
+                             max(0.0, height - cell)))
+        for bar in group:
+            key = f"fw{slot}"
+            slot += 1
+            frame = (f"{cell}*floor(mod((t-{bar['start']:.3f})*{_fps_text(fps)}"
+                     f"\\,{fxart.BURST_FRAMES}))")
+            parts.append(
+                f"null[{key}];"
+                f"movie={name},loop=loop=-1:size=1,setpts=N/({_fps_text(fps)}*TB),"
+                f"crop={cell}:{cell}:0:'{frame}'[{key}i];"
+                f"[{key}][{key}i]overlay=x={left}:y={top}"
+                f":enable='{_enable([bar])}':shortest=1"
+            )
+    return parts
+
+
 _SPEED = _slider("떨어지는 속도", 100, 30, 250, 5)
 _PLACE = {"x": _slider("가로 자리", 50, 0, 100),
           "y": _slider("세로 자리", 50, 0, 100)}
 _SIZE = {"w": _slider("너비", 35, 5, 100),
          "h": _slider("높이", 35, 5, 100)}
+
+# 진하기(투명 정도) — 화면 전체를 덮는 효과에 붙인다.
+#
+# 세기 3단계만으로는 사용자가 원하는 만큼을 못 고른다. 14절에서 값을 순하게
+# 낮췄기 때문에 더 진하게 쓰고 싶은 사람도 있고, 더 옅게 쓰고 싶은 사람도 있다.
+# 기본 100% 는 **낮춘 값 그대로**다 — 아무것도 안 만진 사용자는 화면을 가리지 않는
+# 순한 값을 그대로 받는다. 200% 까지 열어 두어 원하는 사람은 예전의 진한 느낌까지
+# 갈 수 있게 한다. **사용자가 직접 정한 값에는 상한을 걸지 않는다**
+# (memory/effects-must-not-obscure-the-picture.md — 다만 제품이 사용자 값을
+# 더 부풀리는 것은 금지다. 그래서 진하기는 세기와 곱해질 뿐 따로 부풀지 않는다).
+_OPACITY = _slider("진하기", 100, 20, 200, 5)
 
 
 # ── 효과 등록표 ────────────────────────────────────────────
@@ -416,16 +645,25 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "비",
         "hint": "가느다란 빗줄기가 내립니다. 차분하거나 쓸쓸한 장면에 씁니다.",
         "order": 20,
-        "params": {"speed": _SPEED},
+        "params": {"speed": _SPEED, "opacity": _OPACITY},
         # density = 점으로 남길 문턱값(밝기 범위의 몇 %). **낮을수록 점이 많다.**
         # opacity = 레이어를 얼마나 진하게 얹을 것인가.
         # 둘을 함께 움직여야 단계가 벌어진다 — 덕킹에서 값 하나만 움직였다가
         # 이름만 다른 가짜 선택지를 만든 적이 있다 (options-must-actually-differ).
-        # 실측(1280×720): 화면의 5.2% → 15.9% → 29.9% 가 밝아진다. 3.04배 · 1.88배.
+        #
+        # ⚠ 2026-08-15 에 **낮췄다.** 예전 값(0.715/0.703/0.681 · 0.55/0.80/1.00)은
+        # '많이'가 화면의 34.9%를 밝히고 화면의 결을 193%로 늘렸다 — 원본보다 두 배
+        # 어수선해져 시선이 내용이 아니라 빗줄기로 갔다.
+        # (memory/effects-must-not-obscure-the-picture.md)
+        # 한 번에 못 맞췄다: 처음 낮춘 값(0.728/0.716/0.697 · 0.40/0.58/0.78)은 이번엔
+        # **'약하게'가 아무 일도 안 하게** 만들었다(평균 밀림 0.0). 가짜 선택지를 피하려던
+        # 기준을 스스로 어긴 것이라 다시 올렸다. 위아래 두 기준은 함께 재야 맞는다.
+        # ⚠ density 는 **절벽처럼** 동작한다. 0.715 에서는 점이 남고 0.724 에서는
+        # 하나도 안 남는다(실측). 그래서 개수는 좁게 움직이고 진하기로 단계를 벌린다.
         "strengths": {
-            "low": {"density": 0.715, "opacity": 0.55},
-            "medium": {"density": 0.703, "opacity": 0.80},
-            "high": {"density": 0.681, "opacity": 1.00},
+            "low": {"density": 0.715, "opacity": 0.38},
+            "medium": {"density": 0.708, "opacity": 0.52},
+            "high": {"density": 0.702, "opacity": 0.70},
         },
         "layer": _layer_rain,
     },
@@ -433,14 +671,67 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "눈",
         "hint": "둥근 눈송이가 좌우로 흔들리며 천천히 내립니다.",
         "order": 21,
-        "params": {"speed": _SPEED},
-        # 실측(1280×720): 화면의 2.7% → 7.0% → 20.9%. 2.56배 · 2.99배.
+        "params": {"speed": _SPEED, "opacity": _OPACITY},
+        # 비와 같은 이유로 2026-08-15 에 낮췄다 (옛 값 0.723/0.717/0.705 · 0.55/0.80/1.00
+        # 은 '많이'가 화면의 24.4%를 밝혔다).
         "strengths": {
-            "low": {"density": 0.723, "opacity": 0.55},
-            "medium": {"density": 0.717, "opacity": 0.80},
-            "high": {"density": 0.705, "opacity": 1.00},
+            "low": {"density": 0.723, "opacity": 0.46},
+            "medium": {"density": 0.717, "opacity": 0.60},
+            "high": {"density": 0.708, "opacity": 0.74},
         },
         "layer": _layer_snow,
+    },
+    "water_drops": {
+        "label": "물방울 맺힘",
+        "hint": "유리에 물방울이 맺힌 것처럼 곳곳이 살짝 휩니다. 비 오는 날 느낌에 씁니다.",
+        "order": 24,
+        "params": {"size": _slider("방울 크기", 100, 40, 180, 5)},
+        # count = 방울 개수. 화면을 유리로 덮어 버리면 영상이 아니라 유리를 보게 되므로
+        # 개수를 아껴 쓴다 (memory/effects-must-not-obscure-the-picture.md).
+        # 방울을 크게 잡았으므로 개수는 줄인다. 작고 많은 것보다 크고 성긴 편이
+        # 물방울로 읽히고, 화면도 덜 가린다.
+        # 2026-08-15 에 방울 지름을 0.81배로 줄이면서(fxart.py) 개수를 1.3배 올렸다.
+        # 방울이 작아지면 덮는 면적이 줄어 **세기 사다리가 통째로 내려앉기** 때문이다.
+        "strengths": {
+            "low": {"count": 12},
+            "medium": {"count": 25},
+            "high": {"count": 44},
+        },
+        "art": _art_water_drops,
+    },
+    "bubbles": {
+        "label": "비눗방울",
+        "hint": "작은 비눗방울이 천천히 이리저리 떠오릅니다. 밝고 산뜻한 장면에 씁니다.",
+        "order": 25,
+        "params": {"speed": _slider("떠오르는 속도", 100, 30, 250, 5),
+                   "size": _slider("방울 크기", 100, 40, 180, 5)},
+        # rise = 초당 몇 픽셀 떠오르는가. 사용자가 정한 사양이 "천천히"다.
+        # 방울이 겹치면 덮는 면적이 더 안 늘어난다. 그래서 개수만으로는 '많이'가
+        # '보통'과 1.27배밖에 안 벌어졌다(가짜 선택지 문턱은 1.3배). 개수와 함께
+        # **크기**도 키워서 벌렸다 (options-must-actually-differ.md).
+        "strengths": {
+            "low": {"count": 11, "rise": 46, "swell": 0.85},
+            "medium": {"count": 26, "rise": 58, "swell": 1.00},
+            "high": {"count": 58, "rise": 70, "swell": 1.25},
+        },
+        "art": _art_bubbles,
+    },
+    "fireworks": {
+        "label": "작은 폭죽",
+        "hint": "정한 자리에서 작은 폭죽이 한 번 터집니다. 축하하거나 짚어 줄 때 씁니다.",
+        "order": 26,
+        # 2026-08-15 에 기본 크기를 38 → **22** 로 내리고 하한도 15 → 10 으로 넓혔다
+        # (사용자: "폭죽도 아주 작게"). 칸이 작아지면 알갱이도 같이 작아지므로
+        # fxart.py 의 알갱이 굵기(칸/28 → 칸/20)를 **함께** 고쳤다.
+        "params": {**_PLACE, "size": _slider("터지는 크기", 22, 10, 70)},
+        # sparks = 불꽃 알갱이 수, glow = 밝기. 정한 자리에만 걸리므로 화면 전체를
+        # 덮지 않는다 — 그래서 '가림' 상한이 아니라 **자리와 크기**로 다스린다.
+        "strengths": {
+            "low": {"sparks": 28, "glow": 0.62},
+            "medium": {"sparks": 60, "glow": 0.82},
+            "high": {"sparks": 125, "glow": 1.00},
+        },
+        "art": _art_fireworks,
     },
     "blur_area": {
         "label": "부분 흐림",
@@ -458,12 +749,27 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "주변 어둡게",
         "hint": "정한 곳만 밝게 두고 둘레를 어둡게 합니다. 한 곳을 보게 할 때 씁니다.",
         "order": 40,
-        "params": {**_PLACE, "size": _slider("밝은 부분 크기", 35, 8, 90)},
-        # dim = 바깥의 밝기 비율. 작을수록 어둡다.
+        "params": {**_PLACE, "size": _slider("밝은 부분 크기", 35, 8, 90),
+                   "opacity": _OPACITY},
+        # dim = 바깥에 남길 밝기 비율. 작을수록 어둡다.
+        #
+        # ⚠ 2026-08-15 에 크게 올렸다(=덜 어둡게). 옛 값 0.55/0.35/0.18 은 **가장 약한
+        # 단계조차** 화면의 94.5%를 건드리고 밝기를 65%로 떨어뜨렸고, '많이'는 38%까지
+        # 떨어뜨려 화면의 결도 44.8%만 남겼다. 시선을 모으려고 만든 효과가 정작 볼
+        # 것을 지우고 있었다. (memory/effects-must-not-obscure-the-picture.md)
+        #
+        # ⚠ 같은 날 저녁에 합성 방식을 **알파**로 바꾸면서 값을 한 번 더 잡았다
+        # (0.84/0.72/0.56 → 0.86/0.73/0.60). 두 기준이 알파에서는 서로 다르게 움직인다:
+        #   · 화면 전체 평균 밝기 — 알파가 **더 밝게** 나온다(검정 바닥이 16이라서)
+        #   · 둘레(테두리) 밝기   — 알파가 **더 어둡게** 나온다(가운데를 완전히 그대로
+        #     두므로 대비가 크다)
+        # 사용자가 실제로 느끼는 것은 **둘레가 얼마나 어두운가**이므로 그쪽(≥62%)에
+        # 맞췄다. 처음에 화면 평균 66%에 맞춰 0.49 로 내렸더니 둘레가 52%까지
+        # 떨어져 점검이 잡았다. 어두워지는 정도의 간격은 1.93배 · 1.48배다.
         "strengths": {
-            "low": {"dim": 0.55},
-            "medium": {"dim": 0.35},
-            "high": {"dim": 0.18},
+            "low": {"dim": 0.86},
+            "medium": {"dim": 0.73},
+            "high": {"dim": 0.60},
         },
         "layer": _layer_spotlight,
     },
@@ -471,11 +777,14 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "가장자리 어둡게",
         "hint": "네 귀퉁이를 부드럽게 어둡게 해 가운데로 시선을 모읍니다.",
         "order": 45,
-        "params": {},
+        "params": {"opacity": _OPACITY},
+        # a 가 클수록 어둡다. 2026-08-15 에 낮췄다 — 옛 값 PI/6·PI/4·PI/3(0.5236·
+        # 0.7854·1.0472)은 '많이'에서 밝기를 44.1%까지 떨어뜨렸다.
+        # 값을 라디안 숫자로 적는다. PI/10 처럼 식으로 적으면 진하기를 곱할 수 없다.
         "strengths": {
-            "low": {"look": ["vignette=a=PI/6"]},
-            "medium": {"look": ["vignette=a=PI/4"]},
-            "high": {"look": ["vignette=a=PI/3"]},
+            "low": {"look": [("vignette", {"a": 0.3142})]},          # PI/10
+            "medium": {"look": [("vignette", {"a": 0.4833})]},       # PI/6.5
+            "high": {"look": [("vignette", {"a": 0.6981})]},         # PI/4.5
         },
         "build": _build_look,
     },
@@ -488,11 +797,14 @@ KINDS: dict[str, dict[str, Any]] = {
             "contrast": _slider("대비(또렷함)", 100, 0, 200),
             "saturation": _slider("채도(색의 진하기)", 100, 0, 200),
         },
-        # amount = 슬라이더를 얼마나 세게 반영할지
+        # amount = 슬라이더를 얼마나 세게 반영할지.
+        # 2026-08-15 에 0.6/1.0/1.5 에서 낮췄다 — '많이'가 사용자가 정한 값을 1.5배로
+        # 부풀려 밝기 168%까지 날려 버렸다. 슬라이더로 이미 세기를 정하는 효과이므로
+        # 여기서 더 부풀릴 이유가 없다.
         "strengths": {
-            "low": {"amount": 0.6},
-            "medium": {"amount": 1.0},
-            "high": {"amount": 1.5},
+            "low": {"amount": 0.5},
+            "medium": {"amount": 0.8},
+            "high": {"amount": 1.15},
         },
         "build": _build_color_adjust,
     },
@@ -500,7 +812,7 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "따뜻하게",
         "hint": "붉은기를 올려 노을처럼 따뜻한 색으로 바꿉니다.",
         "order": 70,
-        "params": {},
+        "params": {"opacity": _OPACITY},
         # eq 를 **앞에** 둔다. 뒤에 두면 구간 밖까지 화소값이 ±2 밀린다 — 색을 다루는
         # 필터(colorbalance)는 RGB 로, eq 는 YUV 로 일하기 때문에 사이에 변환이 끼는데,
         # 그 변환은 효과가 꺼져 있어도 일어난다. 순서만 바꾸면 차이가 0이 된다(실측).
@@ -508,16 +820,21 @@ KINDS: dict[str, dict[str, Any]] = {
         # 처음에 그림자만 지정했더니 밝은 사진에서는 손댈 자리가 없어 **아무 일도
         # 일어나지 않았다.** 중립 회색에 걸어 재 보니 따뜻하게가 +1.0, 차갑게가 0.0 —
         # 이름만 있는 가짜 선택지였다. 세 톤을 모두 지정해 +11 / +25 / +43 으로 벌렸다.
+        # 2026-08-15 에 전 단계를 0.7배로 낮췄다. 비율을 그대로 곱했으므로 단계 간격
+        # (2.27배 · 1.72배)은 유지된다 — 가짜 선택지가 되지 않는다.
         "strengths": {
             "low": {"look": [
-                "eq=saturation=1.06",
-                "colorbalance=rs=0.05:rm=0.07:rh=0.03:bs=-0.04:bm=-0.07:bh=-0.03"]},
+                ("eq", {"saturation": 1.04}),
+                ("colorbalance", {"rs": 0.04, "rm": 0.05, "rh": 0.02,
+                                  "bs": -0.03, "bm": -0.05, "bh": -0.02})]},
             "medium": {"look": [
-                "eq=saturation=1.12",
-                "colorbalance=rs=0.10:rm=0.14:rh=0.07:bs=-0.08:bm=-0.14:bh=-0.07"]},
+                ("eq", {"saturation": 1.08}),
+                ("colorbalance", {"rs": 0.07, "rm": 0.10, "rh": 0.05,
+                                  "bs": -0.06, "bm": -0.10, "bh": -0.05})]},
             "high": {"look": [
-                "eq=saturation=1.22",
-                "colorbalance=rs=0.17:rm=0.24:rh=0.12:bs=-0.14:bm=-0.24:bh=-0.12"]},
+                ("eq", {"saturation": 1.15}),
+                ("colorbalance", {"rs": 0.12, "rm": 0.17, "rh": 0.08,
+                                  "bs": -0.10, "bm": -0.17, "bh": -0.08})]},
         },
         "build": _build_look,
     },
@@ -525,15 +842,19 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "차갑게",
         "hint": "푸른기를 올려 새벽처럼 차분하고 서늘한 색으로 바꿉니다.",
         "order": 71,
-        "params": {},
-        # 따뜻하게와 같은 이유로 세 톤을 모두 지정한다. 중립 회색에서 -12 / -25 / -41.
+        "params": {"opacity": _OPACITY},
+        # 따뜻하게와 같은 이유로 세 톤을 모두 지정한다. 따뜻하게와 짝을 맞춰
+        # 2026-08-15 에 0.7배로 낮췄다.
         "strengths": {
             "low": {"look": [
-                "colorbalance=rs=-0.04:rm=-0.06:rh=-0.03:bs=0.05:bm=0.08:bh=0.04"]},
+                ("colorbalance", {"rs": -0.03, "rm": -0.04, "rh": -0.02,
+                                  "bs": 0.04, "bm": 0.06, "bh": 0.03})]},
             "medium": {"look": [
-                "colorbalance=rs=-0.08:rm=-0.12:rh=-0.06:bs=0.10:bm=0.16:bh=0.08"]},
+                ("colorbalance", {"rs": -0.06, "rm": -0.08, "rh": -0.04,
+                                  "bs": 0.07, "bm": 0.11, "bh": 0.06})]},
             "high": {"look": [
-                "colorbalance=rs=-0.14:rm=-0.20:rh=-0.10:bs=0.17:bm=0.27:bh=0.13"]},
+                ("colorbalance", {"rs": -0.10, "rm": -0.14, "rh": -0.07,
+                                  "bs": 0.12, "bm": 0.19, "bh": 0.09})]},
         },
         "build": _build_look,
     },
@@ -541,11 +862,13 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "선명하게",
         "hint": "색을 진하게, 명암을 또렷하게 만듭니다.",
         "order": 72,
-        "params": {},
+        "params": {"opacity": _OPACITY},
+        # 2026-08-15 에 낮췄다 (옛 값 1.20/1.45/1.75 · 1.07/1.18/1.30).
+        # 1을 넘는 몫을 0.72배로 줄였으므로 단계 간격은 그대로다.
         "strengths": {
-            "low": {"look": ["eq=saturation=1.20:contrast=1.07"]},
-            "medium": {"look": ["eq=saturation=1.45:contrast=1.18"]},
-            "high": {"look": ["eq=saturation=1.75:contrast=1.30"]},
+            "low": {"look": [("eq", {"saturation": 1.14, "contrast": 1.05})]},
+            "medium": {"look": [("eq", {"saturation": 1.32, "contrast": 1.13})]},
+            "high": {"look": [("eq", {"saturation": 1.54, "contrast": 1.22})]},
         },
         "build": _build_look,
     },
@@ -553,22 +876,27 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "빈티지",
         "hint": "빛바랜 옛날 사진처럼 누런 기가 도는 색으로 바꿉니다.",
         "order": 73,
-        "params": {},
-        # 원래 색과 세피아를 섞은 비율이다 (0.45 / 0.70 / 1.00).
+        "params": {"opacity": _OPACITY},
+        # 원래 색과 세피아를 섞은 비율이다. 2026-08-15 에 0.45/0.70/1.00 에서
+        # **0.20 / 0.33 / 0.50** 으로 낮췄다 — 옛 '많이'는 세피아를 100% 섞어 원래 색을
+        # 통째로 덮었다(화면의 99.4%가 바뀜). 섞는 식은 M = (1-f)·원래색 + f·세피아 다.
         # 따뜻하게와 같은 이유로 eq 를 **앞에** 둔다.
         "strengths": {
             "low": {"look": [
-                "eq=contrast=1.04",
-                "colorchannelmixer=rr=0.727:rg=0.346:rb=0.085"
-                ":gr=0.157:gg=0.859:gb=0.076:br=0.122:bg=0.240:bb=0.609"]},
+                ("eq", {"contrast": 1.02}),
+                ("colorchannelmixer", {"rr": 0.879, "rg": 0.154, "rb": 0.038,
+                                       "gr": 0.070, "gg": 0.937, "gb": 0.034,
+                                       "br": 0.054, "bg": 0.107, "bb": 0.826})]},
             "medium": {"look": [
-                "eq=contrast=1.07",
-                "colorchannelmixer=rr=0.575:rg=0.538:rb=0.132"
-                ":gr=0.244:gg=0.780:gb=0.118:br=0.190:bg=0.374:bb=0.392"]},
+                ("eq", {"contrast": 1.03}),
+                ("colorchannelmixer", {"rr": 0.800, "rg": 0.254, "rb": 0.062,
+                                       "gr": 0.115, "gg": 0.896, "gb": 0.055,
+                                       "br": 0.090, "bg": 0.176, "bb": 0.713})]},
             "high": {"look": [
-                "eq=contrast=1.10:brightness=0.02",
-                "colorchannelmixer=rr=0.393:rg=0.769:rb=0.189"
-                ":gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131"]},
+                ("eq", {"contrast": 1.05}),
+                ("colorchannelmixer", {"rr": 0.697, "rg": 0.385, "rb": 0.095,
+                                       "gr": 0.175, "gg": 0.843, "gb": 0.084,
+                                       "br": 0.136, "bg": 0.267, "bb": 0.566})]},
         },
         "build": _build_look,
     },
@@ -576,11 +904,16 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "흑백",
         "hint": "색을 빼 흑백으로 만듭니다. 많이로 하면 명암이 더 강해집니다.",
         "order": 74,
-        "params": {},
+        "params": {"opacity": _OPACITY},
+        # 흑백은 결(디테일)을 지우지 않으므로 '가림'의 문제가 아니다. 다만 '많이'의
+        # 대비 1.25 는 어두운 곳을 뭉개 내용을 잃게 했다 — 2026-08-15 에 1.12 로 낮추고
+        # '약하게'도 색을 조금 더 남겼다.
+        # 진하기를 100% 아래로 내리면 색이 조금 남고, 100% 위로는 s 가 0에서 멈춘다
+        # (색은 더 뺄 수 없다). 대신 대비가 계속 올라간다.
         "strengths": {
-            "low": {"look": ["hue=s=0.35"]},
-            "medium": {"look": ["hue=s=0"]},
-            "high": {"look": ["hue=s=0", "eq=contrast=1.25"]},
+            "low": {"look": [("hue", {"s": 0.45})]},
+            "medium": {"look": [("hue", {"s": 0.0})]},
+            "high": {"look": [("hue", {"s": 0.0}), ("eq", {"contrast": 1.12})]},
         },
         "build": _build_look,
     },
@@ -738,6 +1071,13 @@ def _compose(layers: list[tuple[str, str, str]]) -> str:
     `color=` 같은 생성 필터가 **끝이 없는 스트림**이라 렌더가 영원히 안 끝나기
     때문이다 (같은 문서 ④ — 30초 영상이 6분 40초가 지나도 안 끝났다).
     원본에서 갈라 오면 길이가 원본과 같아 그 함정을 아예 만나지 않는다.
+
+    합성 방식은 그림이 정한다:
+
+      · `screen`/`multiply` — 밝기 면만 섞는다. **밝히는** 비·눈이 쓴다
+      · `alpha`             — 알파를 가진 그림을 통째로 얹는다. **어둡게 하는**
+                              주변 어둡게가 쓴다. 밝기만 줄이면 색이 튄다
+                              (`_layer_spotlight` 설명 참고)
     """
     count = len(layers)
     lines = [f"split={count + 1}[fxbg]" + "".join(f"[fxin{i}]" for i in range(count))]
@@ -746,7 +1086,8 @@ def _compose(layers: list[tuple[str, str, str]]) -> str:
 
     source = "fxbg"
     for index, (_made, gate, mode) in enumerate(layers):
-        step = f"[{source}][fxlay{index}]{_luma_blend(mode)}"
+        joint = "overlay=0:0" if mode == "alpha" else _luma_blend(mode)
+        step = f"[{source}][fxlay{index}]{joint}"
         if gate:
             step += f":enable='{gate}'"
         if index < count - 1:
@@ -757,8 +1098,14 @@ def _compose(layers: list[tuple[str, str, str]]) -> str:
     return ";".join(lines)
 
 
+def needs_art(items: list[dict[str, Any]]) -> bool:
+    """이 효과 목록에 **그림 파일이 필요한 효과**가 들어 있는가."""
+    return any(KINDS.get(b.get("kind", ""), {}).get("art") for b in (items or []))
+
+
 def build_filter(
-    items: list[dict[str, Any]], width: int, height: int, fps: float
+    items: list[dict[str, Any]], width: int, height: int, fps: float,
+    folder: str | Path | None = None,
 ) -> str | None:
     """효과 목록 전체를 FFmpeg 영상 필터 문자열 하나로 만든다.
 
@@ -767,12 +1114,24 @@ def build_filter(
 
     거는 자리는 **화면비·확대 뒤, 자막 앞**이다. 자막이 맨 마지막이 아니면 글자가
     효과에 가려 읽기 어려워진다.
+
+    `folder` 는 물방울·비눗방울·작은 폭죽이 쓸 **그림을 둘 폴더**다. FFmpeg 이 바로
+    그 폴더에서 실행되므로 필터에는 파일 이름만 들어간다.
+
+    ⚠ 그림이 필요한 효과가 있는데 `folder` 를 안 주면 **일부러 터뜨린다.** 조용히
+    건너뛰면 "효과를 걸었는데 아무 일도 안 일어나는" 결과가 되는데, 이 저장소에서
+    나온 결함 대부분이 바로 그런 '오류 없이 틀린 결과'였다.
     """
     if not items or not (width > 0 and height > 0 and fps > 0):
         return None
+    if needs_art(items) and folder is None:
+        raise ValueError(
+            "물방울·비눗방울·작은 폭죽은 그림 파일이 필요합니다. "
+            "build_filter(..., folder=그림을_둘_폴더) 로 폴더를 알려 주세요."
+        )
 
     parts: list[str] = []
-    layers: list[tuple[str, str]] = []
+    layers: list[tuple[str, str, str]] = []
 
     for name, spec in sorted(KINDS.items(), key=lambda kv: kv[1]["order"]):
         bars = [b for b in items if b.get("kind") == name]
@@ -784,6 +1143,14 @@ def build_filter(
                 parts.append(made)
         if spec.get("layer"):
             layers.extend(spec["layer"](bars, int(width), int(height), float(fps)))
+        if spec.get("art"):
+            # 그림을 쓰는 효과는 **먼저 얹혀 있던 레이어를 마무리한 뒤**에 온다.
+            # 순서를 지키지 않으면 비 위에 물방울이 와야 하는데 뒤바뀐다.
+            if layers:
+                parts.append(_compose(layers))
+                layers = []
+            parts.extend(spec["art"](bars, int(width), int(height), float(fps),
+                                     Path(folder)))
 
     if layers:
         parts.append(_compose(layers))

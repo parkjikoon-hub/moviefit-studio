@@ -1,4 +1,4 @@
-"""화면 효과 — 색감·강조·부분 흐림과 **값 조절(슬라이더)** 점검 (3~4단계).
+﻿"""화면 효과 — 색감·강조·부분 흐림과 **값 조절(슬라이더)** 점검 (3~4단계).
 
 사용법:
     python tests/looks_test.py                    FFmpeg 만 있으면 된다 (서버 불필요)
@@ -76,7 +76,7 @@ for kind in NEW_KINDS:
     check(f"등록표에 {kind} 가 있다", kind in effects.KINDS,
           LABELS.get(kind, "없음"))
 
-check("효과가 13가지 등록되어 있다", len(effects.KINDS) == 13,
+check("효과가 16가지 등록되어 있다", len(effects.KINDS) == 16,
       f"실제 {len(effects.KINDS)}가지: {[k['label'] for k in effects.kind_list()]}")
 
 check("모든 효과에 한 줄 설명이 붙어 있다",
@@ -140,8 +140,8 @@ check("등록표에 없는 값은 저장하지 않는다",
             "params": {"몰래": 1}}], duration=10.0)[0]["params"]))
 
 check("값이 없는 효과는 빈 값으로 남는다",
-      effects.defaults_for("vignette") == {}
-      and effects.defaults_for("rain") == {"speed": 100})
+      effects.defaults_for("zoom_punch") == {}
+      and effects.defaults_for("rain") == {"speed": 100, "opacity": 100})
 
 slow = flt("rain", params={"speed": 40})
 quick = flt("rain", params={"speed": 200})
@@ -182,12 +182,15 @@ check("모든 효과가 구간 지정을 필터에 넣는다",
       all("enable='between(t,2.000,4.000)" in flt(k) for k in NEW_KINDS),
       "빠지면 영상 전체에 걸린다")
 
-check("주변 어둡게는 곱하기로 합성한다 (screen 이면 밝아진다)",
-      "c0_mode=multiply" in flt("spotlight"))
+check("주변 어둡게는 **검은 그림을 알파로** 얹는다 (밝기만 곱하면 색이 튄다)",
+      "format=yuva420p" in flt("spotlight") and "lum=16" in flt("spotlight")
+      and "overlay=0:0" in flt("spotlight")
+      and "c0_mode=multiply" not in flt("spotlight"),
+      "밝기(Y)만 줄이고 색차(U·V)를 두면 밝기에 견준 색이 커져 화면이 보라색이 된다")
 
-check("주변 어둡게도 색 면은 건드리지 않는다",
-      "c1_mode=normal" in flt("spotlight") and "c2_mode=normal" in flt("spotlight")
-      and "c1_opacity=0" not in flt("spotlight"),
+check("비·눈은 밝기 면만 얹고 색 면은 건드리지 않는다",
+      "c0_mode=screen" in flt("rain") and "c1_mode=normal" in flt("rain")
+      and "c2_mode=normal" in flt("rain") and "c1_opacity=0" not in flt("rain"),
       "opacity=0 을 주면 색이 효과 그림의 중립값으로 덮여 화면이 흑백이 된다")
 
 check("주변 어둡게의 마스크는 작은 자에서 그린 뒤 늘린다 (geq 는 느리다)",
@@ -351,9 +354,12 @@ else:
                 float(got[rows, RIGHT].mean() / max(1.0, was[rows, RIGHT].mean())),
             )
         if None not in kept.values():
+            # 문턱 0.2 → 0.10. 효과를 일부러 순하게 바꿨기 때문이다(2026-08-15).
+            # 재는 것은 **자리가 따라오는가**이지 얼마나 어두운가가 아니므로, 방향이
+            # 뚜렷하면 통과해야 맞다. 0.10 은 잡음(±0.01)보다 열 배 크다.
             check("주변 어둡게: 밝게 남는 곳이 정한 자리를 따라간다",
-                  kept["왼쪽"][0] > kept["왼쪽"][1] + 0.2
-                  and kept["오른쪽"][1] > kept["오른쪽"][0] + 0.2,
+                  kept["왼쪽"][0] > kept["왼쪽"][1] + 0.10
+                  and kept["오른쪽"][1] > kept["오른쪽"][0] + 0.10,
                   f"자리를 왼쪽에 두면 왼쪽 {kept['왼쪽'][0] * 100:.0f}% / "
                   f"오른쪽 {kept['왼쪽'][1] * 100:.0f}% 남고, "
                   f"오른쪽에 두면 왼쪽 {kept['오른쪽'][0] * 100:.0f}% / "
@@ -375,9 +381,14 @@ else:
         if made is not None:
             got, was = shot(made, 3.0).mean(axis=2), base_in.mean(axis=2)
             mid = float(got[330:390, 610:670].sum() / max(1.0, was[330:390, 610:670].sum()))
+            # 예전에는 "테두리가 60% 아래로 어두워질 것"을 요구했다. 그것은 **과하게
+            # 어두운 상태를 점검이 강제하던 것**이라 바꿨다(2026-08-15). 재야 할 것은
+            # 가운데와 둘레의 **차이**이지 둘레의 절대 어둡기가 아니다.
+            rim = edge_keep(made)
             check("주변 어둡게: 가운데는 밝기를 지키고 둘레만 어두워진다",
-                  mid > 0.93 and edge_keep(made) < 0.6,
-                  f"가운데 {mid * 100:.0f}% 유지 · 테두리 {edge_keep(made) * 100:.0f}% 유지")
+                  mid > 0.93 and mid - rim > 0.12,
+                  f"가운데 {mid * 100:.0f}% 유지 · 테두리 {rim * 100:.0f}% 유지"
+                  f" (차이 {(mid - rim) * 100:.0f}%p)")
 
         # ── 흑백이 정말 색을 빼는가 ─────────────────────────────
         made = render(flt("mono"), "mono_chk")
@@ -410,8 +421,8 @@ else:
             return float(rgb[:, :, 0].mean() - rgb[:, :, 2].mean())
 
         # 구간 지정을 뺀 순수한 색 필터로 잰다 (회색 그림은 1프레임뿐이다)
-        def look_only(kind: str, strength: str = "medium") -> str:
-            return ",".join(effects.KINDS[kind]["strengths"][strength]["look"])
+        def look_only(kind: str, strength: str = "medium", opacity: float = 100) -> str:
+            return ",".join(effects.look_filters(kind, strength, opacity))
 
         flat = warmth("")
         hot, cold = warmth(look_only("warm")), warmth(look_only("cool"))
@@ -466,11 +477,24 @@ else:
                               params={"x": 50, "y": 50, "size": 25}), f"d_{level}")
             rest.append(edge_keep(made) if made is not None else None)
         if None not in rest and min(rest) > 0:
-            gap1, gap2 = rest[0] / rest[1], rest[1] / rest[2]
+            # ⚠ 예전에는 **남은 밝기끼리** 나눴다(rest[0]/rest[1]). 그것은 '어두워지는
+            #   정도'가 아니다 — 효과가 셀 때만 우연히 1.3배를 넘고, 순해지면 세 단계가
+            #   잘 벌어져 있어도 1에 가까워진다. 실제로 순하게 바꾸자 1.13배로 나와
+            #   멀쩡한 사다리를 실패로 판정했다. 재야 할 것은 **어두워진 양**이다.
+            dark = [1.0 - r for r in rest]
+            gap1, gap2 = dark[1] / dark[0], dark[2] / dark[1]
             check("주변 어둡게: 세 단계의 어두워지는 정도가 1.3배 넘게 벌어진다",
-                  rest[0] > rest[1] > rest[2] and gap1 >= 1.3 and gap2 >= 1.3,
-                  f"테두리에 남는 밝기 {rest[0] * 100:.0f}% → {rest[1] * 100:.0f}%"
-                  f" → {rest[2] * 100:.0f}%  (간격 {gap1:.2f}배 · {gap2:.2f}배)")
+                  dark[0] < dark[1] < dark[2] and gap1 >= 1.3 and gap2 >= 1.3,
+                  f"테두리가 어두워진 양 {dark[0] * 100:.0f}% → {dark[1] * 100:.0f}%"
+                  f" → {dark[2] * 100:.0f}%  (간격 {gap1:.2f}배 · {gap2:.2f}배)")
+            # 위쪽 한계 — 이것이 없어서 사다리가 위로만 밀려 올라갔다.
+            # (memory/effects-must-not-obscure-the-picture.md)
+            check("주변 어둡게: 가장 센 단계도 둘레 밝기를 62% 밑으로 떨어뜨리지 않는다",
+                  rest[2] >= 0.62,
+                  f"'많이'에서 테두리에 남는 밝기 {rest[2] * 100:.0f}% (최소 62%)")
+            check("주변 어둡게: 가장 약한 단계도 눈에 띄게 어두워진다",
+                  dark[0] >= 0.08,
+                  f"'약하게'가 어둡게 하는 양 {dark[0] * 100:.0f}% (최소 8%)")
         else:
             check("주변 어둡게: 세 단계의 어두워지는 정도가 1.3배 넘게 벌어진다",
                   False, "측정 실패")
@@ -512,9 +536,245 @@ else:
 
 
 # ══════════════════════════════════════════════════════════════
-# 5. 서버가 화면에 제대로 알려 주는가
+# 5. 화면을 가리지 않는가 (위쪽 한계)
 # ══════════════════════════════════════════════════════════════
-print("\n=== 5. 서버가 알려 주는 목록 ===")
+#
+# 왜 이 절이 따로 있는가: 세기 3단계를 정할 때 지키던 기준은 "단계가 1.3배 넘게
+# 벌어질 것" **하나뿐**이었다. 그것은 아래에서 미는 힘만 주므로 '많이'가 끝없이
+# 세졌고, 사용자가 "효과들이 화면을 너무 가려 영상에 집중할 수 없다"고 지적했다.
+# 그때 점검 715개는 전부 통과하고 있었다.
+# (memory/effects-must-not-obscure-the-picture.md)
+#
+# 그리고 **여기서만 결이 있는 화면을 따로 만들어 쓴다.** 위 4절이 쓰는 샘플은
+# 색막대라 국소대비가 0.69밖에 안 되어 '결을 얼마나 흐트러뜨리는가'를 아예 잴 수
+# 없다. 실제 영상과 비슷한 성질(중간 밝기·적당한 색·결)을 갖춘 화면이 필요하다.
+print("\n=== 5. 화면을 가리지 않는가 ===")
+
+if not (have_pixels and have_ffmpeg):
+    skip("가림 한계", "numpy/Pillow 또는 FFmpeg 이 없습니다")
+else:
+    CW, CH, CFPS, CSECS = 1280, 720, 30, 5.0
+    cover_work = Path(tempfile.mkdtemp(prefix="cover_"))
+
+    # 4절의 shot() 을 쓰면 안 된다 — 그 함수가 쓰는 임시 폴더는 4절 끝에서 지워진다.
+    def cover_shot(video: Path, at: float):
+        dst = cover_work / "_f.png"
+        dst.unlink(missing_ok=True)
+        subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+                        "-ss", f"{at}", "-i", str(video), "-frames:v", "1", str(dst)],
+                       capture_output=True, timeout=120)
+        return np.array(Image.open(dst).convert("RGB")).astype(np.float32)
+
+    def make_textured(dst: Path) -> Path | None:
+        """결이 있는 풍경 비슷한 화면. 통계를 실제 영상에 맞춘다."""
+        rng = np.random.default_rng(7)
+        yy, xx = np.mgrid[0:CH, 0:CW].astype(np.float32)
+        sky = np.clip(150 - yy / CH * 40, 0, 255)
+        img = np.dstack([sky * 0.80, sky * 0.88, sky * 1.00]).astype(np.float32)
+        ground = yy > CH * 0.55
+        for chan, tone in enumerate((120.0, 108.0, 82.0)):
+            img[..., chan][ground] = tone
+        for scale, amp in ((4, 26.0), (9, 18.0), (23, 12.0), (57, 9.0)):
+            small = rng.normal(0.0, 1.0, (CH // scale + 2, CW // scale + 2)).astype(np.float32)
+            img += (np.array(Image.fromarray(small).resize((CW, CH), Image.BICUBIC)) * amp)[..., None]
+        for cx, cy, rad, col in ((330, 430, 74, (196, 168, 96)),
+                                 (900, 380, 58, (86, 122, 150)),
+                                 (640, 300, 40, (208, 196, 176))):
+            spot = (xx - cx) ** 2 + (yy - cy) ** 2 < rad * rad
+            for chan in range(3):
+                img[..., chan][spot] = col[chan]
+        img += rng.normal(0.0, 3.0, img.shape).astype(np.float32)
+        png = cover_work / "scene.png"
+        Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).save(png)
+        done = subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
+             "-loop", "1", "-i", str(png), "-t", f"{CSECS}", "-r", str(CFPS),
+             "-vf", f"scale={CW + 40}:{CH + 24},crop={CW}:{CH}"
+                    ":'20+18*sin(2*PI*0.10*t)':'12+8*sin(2*PI*0.07*t)'",
+             "-c:v", "ffv1", "-pix_fmt", "yuv420p", str(dst)],
+            capture_output=True, timeout=600)
+        return dst if done.returncode == 0 else None
+
+    def cover_render(clip: Path, vf: str, name: str) -> Path | None:
+        dst = cover_work / f"{name}.mkv"
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(clip)]
+        if vf:
+            cmd += ["-vf", vf]
+        cmd += ["-c:v", "ffv1", "-an", str(dst)]
+        done = subprocess.run(cmd, capture_output=True, timeout=900)
+        return dst if done.returncode == 0 else None
+
+    def grain(rgb) -> float:
+        """결이 얼마나 살아 있는가 — 이웃 화소와의 차이 평균."""
+        lum = rgb.mean(axis=2)
+        return float((np.abs(np.diff(lum, axis=1)).mean()
+                      + np.abs(np.diff(lum, axis=0)).mean()) / 2)
+
+    def colourful(rgb) -> float:
+        """**밝기에 견준** 색의 진하기 — 사람이 '색이 진하다'고 느끼는 값.
+
+        4절의 `spread()`(빨강-파랑의 절대 차이)로는 이 결함을 못 잡는다. 빨강과
+        파랑의 차이는 `1.402(V-128) + 1.772(U-128)` 이라 **밝기와 아무 상관이 없어서**,
+        밝기만 반으로 줄여도 그 값은 그대로다. 실제로 주변 어둡게가 화면을 보라색으로
+        물들이는 동안 그 검사는 통과하고 있었다.
+        """
+        top, bottom = rgb.max(axis=2), rgb.min(axis=2)
+        return float(((top - bottom) / np.maximum(top, 1.0)).mean())
+
+    # 효과마다 '가림'의 뜻이 다르므로 재는 자도 다르다.
+    #   push   — 화면 전체 평균 밀림의 상한 (0~255 자)
+    #   light  — '많이'에서도 남아 있어야 할 밝기 비율 (어둡게 하는 효과)
+    #   tex    — 결이 얼마나 늘거나 줄어도 되는가 (비·눈은 결을 **더한다**)
+    #   colour — 색이 얼마나 진해져도 되는가. **어둡게 하는 효과에만** 건다.
+    #            색을 바꾸는 것이 목적인 효과(따뜻하게·빈티지…)에는 걸지 않는다
+    LIMITS = {
+        "rain":     {"push": 18.0, "tex": (0.80, 1.40)},
+        "snow":     {"push": 18.0, "tex": (0.80, 1.40)},
+        "spotlight": {"light": 0.62, "colour": 1.15},
+        "vignette":  {"light": 0.62, "colour": 1.15},
+        "warm":     {"push": 18.0},
+        "cool":     {"push": 18.0},
+        "vivid":    {"push": 18.0},
+        "vintage":  {"push": 18.0},
+    }
+    # 상한을 두지 않는 것과 그 이유 — 빠뜨린 것이 아니라 **일부러** 뺀 것이다.
+    EXEMPT = {
+        "zoom_punch": "화면을 덮는 것이 아니라 옮기는 효과다",
+        "color_adjust": "사용자가 슬라이더로 직접 정한다",
+        "mono": "색을 빼는 것이 목적이고 결은 지우지 않는다",
+        "blur_area": "정한 자리만 건드리는 것이 목적이다",
+        "box_mark": "정한 자리만 건드리는 것이 목적이다",
+        # 아래 셋은 그림 파일이 있어야 만들어지므로 렌더 방법이 다르다.
+        # 같은 잣대(덮인 면적·평균 밀림·남은 결)로 tests/artfx_test.py 에서 잰다.
+        "water_drops": "그림 파일을 쓰므로 artfx_test.py 에서 같은 잣대로 잰다",
+        "bubbles": "그림 파일을 쓰므로 artfx_test.py 에서 같은 잣대로 잰다",
+        "fireworks": "그림 파일을 쓰므로 artfx_test.py 에서 같은 잣대로 잰다",
+    }
+
+    try:
+        scene = make_textured(cover_work / "scene.mkv")
+        flat = cover_render(scene, "", "flat") if scene else None
+        if flat is None:
+            skip("가림 한계", "시험 화면을 만들지 못했습니다")
+        else:
+            ref = cover_shot(flat, 3.0)
+            check("시험 화면이 실제 영상처럼 결을 갖고 있다 (색막대가 아니다)",
+                  grain(ref) > 3.0,
+                  f"국소대비 {grain(ref):.2f} (색막대는 0.7 언저리다)")
+
+            check("상한을 두지 않은 효과에는 그 이유가 적혀 있다",
+                  set(LIMITS) | set(EXEMPT) == set(effects.KINDS),
+                  f"상한 {len(LIMITS)}종 · 면제 {len(EXEMPT)}종 / 전체 {len(effects.KINDS)}종")
+
+            for kind, rule in LIMITS.items():
+                label = effects.KINDS[kind]["label"]
+                seen = {}
+                for level in ("low", "high"):
+                    made = cover_render(scene, flt(kind, strength=level), f"c_{kind}_{level}")
+                    seen[level] = cover_shot(made, 3.0) if made else None
+                if seen["low"] is None or seen["high"] is None:
+                    check(f"{label}: 가림 한계", False, "렌더 실패")
+                    continue
+
+                soft = float(np.abs(seen["low"] - ref).mean())
+                hard = float(np.abs(seen["high"] - ref).mean())
+
+                # 아래쪽 — '약하게'가 아무 일도 안 하면 이름만 있는 가짜 단계다.
+                # 값을 낮추다가 실제로 이 상태를 만든 적이 있다 (평균 밀림 0.00).
+                check(f"{label}: '약하게'가 아무 일도 안 하지 않는다",
+                      soft > 0.3, f"평균 밀림 {soft:.2f} (최소 0.3)")
+
+                if "push" in rule:
+                    check(f"{label}: '많이'가 화면을 지나치게 덮지 않는다",
+                          hard <= rule["push"],
+                          f"평균 밀림 {hard:.1f} (상한 {rule['push']:.0f})")
+                if "light" in rule:
+                    left = float(seen["high"].mean() / ref.mean())
+                    check(f"{label}: '많이'에서도 화면 밝기가 남아 있다",
+                          left >= rule["light"],
+                          f"남은 밝기 {left * 100:.0f}% (최소 {rule['light'] * 100:.0f}%)")
+                if "colour" in rule:
+                    # 어둡게 하는 효과가 **색을 진하게 만들면 안 된다.** 밝기만 줄이고
+                    # 색차를 그대로 두면 화면이 보라색으로 물든다 — 실제로 그렇게
+                    # 만들었다가 데모를 눈으로 보고 잡았다(색의 진하기 150%).
+                    tint = colourful(seen["high"]) / colourful(ref)
+                    check(f"{label}: 어두워질 때 색이 튀지 않는다",
+                          tint <= rule["colour"],
+                          f"색의 진하기 {tint * 100:.0f}% "
+                          f"(상한 {rule['colour'] * 100:.0f}%)")
+                if "tex" in rule:
+                    low_t, high_t = rule["tex"]
+                    kept = grain(seen["high"]) / grain(ref)
+                    # 결이 **늘어나는 것도** 가리는 것이다 — 화면이 어수선해져
+                    # 시선이 내용이 아니라 효과로 간다. 비 '많이'가 193%였다.
+                    check(f"{label}: '많이'가 화면을 어수선하게 만들지 않는다",
+                          low_t <= kept <= high_t,
+                          f"남은 결 {kept * 100:.0f}% (허용 {low_t * 100:.0f}~{high_t * 100:.0f}%)")
+
+            # ── 5-2. 진하기(투명 정도)를 사용자가 정할 수 있는가 ──────────
+            #
+            # 세기 3단계만으로는 원하는 만큼을 못 고른다는 지적을 받아 붙인 손잡이다.
+            # 두 가지를 함께 지켜야 한다:
+            #
+            #   ① 기본값이 **반드시 100%** 여야 한다. 기본값을 올리면 위 상한 점검이
+            #      더 진한 값을 재게 되어, 14절에서 값을 낮춘 일이 통째로 무의미해진다.
+            #   ② 슬라이더가 **실제로 화면을 바꿔야** 한다. 이름만 있는 손잡이는
+            #      사용자를 속이는 것이다 (memory/options-must-actually-differ.md).
+            #
+            # 흑백만 '약하게'에서 잰다. '보통'·'많이'는 이미 채도가 0이라 진하기를
+            # 100% 위로 올려도 더 뺄 색이 없다(실측 1.00배). 그것은 가짜 손잡이가
+            # 아니라 **물리적인 끝**이고, 아래쪽으로는 정상적으로 움직인다.
+            OPACITY_KINDS = {"spotlight": "high", "vignette": "high",
+                             "rain": "high", "snow": "high", "warm": "high",
+                             "cool": "high", "vivid": "high", "vintage": "high",
+                             "mono": "low"}
+
+            check("진하기 슬라이더가 14절에서 값을 낮춘 효과 전부에 붙어 있다",
+                  {k for k, s in effects.KINDS.items() if "opacity" in s["params"]}
+                  == set(OPACITY_KINDS),
+                  f"붙은 것 {sorted(k for k, s in effects.KINDS.items() if 'opacity' in s['params'])}")
+
+            check("진하기의 기본값이 100%다 (기본값을 올리면 위 상한 점검이 무력해진다)",
+                  all(effects.defaults_for(k)["opacity"] == 100 for k in OPACITY_KINDS),
+                  f"실제 {[effects.defaults_for(k)['opacity'] for k in OPACITY_KINDS]}")
+
+            for kind, level in OPACITY_KINDS.items():
+                label = effects.KINDS[kind]["label"]
+                steps, shots = [], {}
+                for opa in (50, 100, 200):
+                    made = cover_render(scene, flt(kind, strength=level,
+                                                   params={"opacity": opa}),
+                                        f"o_{kind}_{opa}")
+                    shots[opa] = cover_shot(made, 3.0) if made else None
+                    steps.append(float(np.abs(shots[opa] - ref).mean())
+                                 if made else None)
+                # 진하기를 끝까지 올려도 어둡게 하는 효과가 색을 튀게 하면 안 된다.
+                # 슬라이더는 사용자가 정하는 것이지만, **망가진 그림**을 내놓는 것은
+                # 사용자가 정한 것이 아니라 만든 쪽의 결함이다.
+                if kind in LIMITS and "colour" in LIMITS[kind] and shots[200] is not None:
+                    tint = colourful(shots[200]) / colourful(ref)
+                    check(f"{label}: 진하기를 끝까지 올려도 색이 튀지 않는다",
+                          tint <= LIMITS[kind]["colour"],
+                          f"진하기 200%에서 색의 진하기 {tint * 100:.0f}% "
+                          f"(상한 {LIMITS[kind]['colour'] * 100:.0f}%)")
+                if None in steps:
+                    check(f"{label}: 진하기가 화면을 실제로 바꾼다", False, "렌더 실패")
+                    continue
+                gaps = (steps[1] / max(steps[0], 1e-6), steps[2] / max(steps[1], 1e-6))
+                check(f"{label}: 진하기가 화면을 실제로 바꾼다 (이름만 있는 손잡이가 아니다)",
+                      steps[0] < steps[1] < steps[2] and min(gaps) >= 1.3,
+                      f"50% {steps[0]:.2f} · 100% {steps[1]:.2f} · 200% {steps[2]:.2f}"
+                      f"  (간격 {gaps[0]:.2f}배 · {gaps[1]:.2f}배)")
+    finally:
+        for leftover in cover_work.glob("*"):
+            leftover.unlink(missing_ok=True)
+        cover_work.rmdir()
+
+
+# ══════════════════════════════════════════════════════════════
+# 6. 서버가 화면에 제대로 알려 주는가
+# ══════════════════════════════════════════════════════════════
+print("\n=== 6. 서버가 알려 주는 목록 ===")
 
 BASE = os.environ.get("MOVIEFIT_TEST_URL", "http://127.0.0.1:8765").rstrip("/")
 
@@ -530,14 +790,20 @@ try:
 except Exception as exc:      # noqa: BLE001
     skip("서버 목록", f"서버에 연결하지 못했습니다 ({BASE}): {exc}")
 else:
-    check("서버가 13가지를 모두 알려 준다", len(served) == 13,
+    check("서버가 16가지를 모두 알려 준다", len(served) == 16,
           f"실제 {len(served)}가지")
     check("서버가 값 설명서까지 함께 알려 준다 (화면이 슬라이더를 그릴 수 있다)",
           any(k["kind"] == "rain" and any(p["key"] == "speed" for p in k["params"])
               for k in served),
           f"비의 값: {[p['key'] for k in served if k['kind'] == 'rain' for p in k['params']]}")
+    # 2026-08-15 에 색감 계열 전부에 진하기 슬라이더가 붙어, 값이 하나도 없는 효과는
+    # 줌 강조만 남았다.
     check("값이 필요 없는 효과는 빈 목록으로 온다",
-          all(k["params"] == [] for k in served if k["kind"] in ("vignette", "warm", "mono")))
+          all(k["params"] == [] for k in served if k["kind"] == "zoom_punch"))
+    check("색감 계열에는 진하기 슬라이더가 함께 온다",
+          all(any(p["key"] == "opacity" for p in k["params"])
+              for k in served if k["kind"] in ("vignette", "warm", "mono")),
+          f"빈티지의 값: {[p['key'] for k in served if k['kind'] == 'vintage' for p in k['params']]}")
 
 
 # ══════════════════════════════════════════════════════════════

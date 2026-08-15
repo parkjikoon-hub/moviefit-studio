@@ -269,7 +269,8 @@ try:
         put("비")
         names = page.eval_on_selector_all(
             "#fx-params .fx-param-head span:first-child", "els => els.map(e => e.textContent)")
-        check("비를 고르면 속도 슬라이더가 나온다", names == ["떨어지는 속도"], f"실제 {names}")
+        check("비를 고르면 속도·진하기 슬라이더가 나온다",
+              names == ["떨어지는 속도", "진하기"], f"실제 {names}")
 
         shown = page.eval_on_selector("#fx-params .fx-param-head b", "e => e.textContent")
         check("슬라이더 옆에 지금 값이 보인다", shown == "100%", f"실제 {shown!r}")
@@ -292,15 +293,17 @@ try:
         names = page.eval_on_selector_all(
             "#fx-params .fx-param-head span:first-child", "els => els.map(e => e.textContent)")
         check("효과를 바꾸면 슬라이더 목록도 바뀐다",
-              names == ["가로 자리", "세로 자리", "밝은 부분 크기"], f"실제 {names}")
+              names == ["가로 자리", "세로 자리", "밝은 부분 크기", "진하기"], f"실제 {names}")
         check("새 막대는 기본값을 갖고 태어난다",
               page.evaluate("JSON.stringify(project.effects[0].params)")
-              == '{"x":50,"y":50,"size":35}',
+              == '{"x":50,"y":50,"size":35,"opacity":100}',
               f"실제 {page.evaluate('JSON.stringify(project.effects[0].params)')}")
         page.locator("#fx-delete").click()
         page.wait_for_timeout(200)
 
-        put("가장자리 어둡게")
+        # 가장자리 어둡게는 2026-08-15 에 진하기 슬라이더가 붙어 더 이상 '값이 없는
+        # 효과'가 아니다. 값이 하나도 없는 것은 줌 강조만 남았다.
+        put("줌 강조")
         check("값이 없는 효과에서는 슬라이더 칸이 숨는다",
               page.locator("#fx-params").is_hidden()
               or page.eval_on_selector_all("#fx-params .fx-param", "els => els.length") == 0)

@@ -509,9 +509,13 @@ def burn_subtitles(
     # 화면 효과는 **잘라내기 뒤, 자막 앞**에 온다.
     #   · 잘라내기 뒤인 이유: 효과를 출력 크기(더 작다)에만 걸면 되어 빠르다.
     #   · 자막 앞인 이유: 효과가 자막 위에 오면 글자가 가려 읽기 어려워진다.
+    #   · 물방울·비눗방울·작은 폭죽은 파이썬이 그린 그림을 쓴다. 그림은 **자막 파일과
+    #     같은 폴더**(workdir)에 둔다. FFmpeg 이 그 폴더에서 실행되므로 필터에는 파일
+    #     이름만 들어가고, 윈도우 경로의 콜론 때문에 필터가 깨지는 일이 없다
+    #     (memory/ffmpeg-filter-path-escaping.md).
     effect_filter = effects.build_filter(
         effects.normalize(effects_list, duration=target_duration),
-        width, height, video_fps(source),
+        width, height, video_fps(source), folder=workdir,
     )
 
     # 자르기가 먼저, 자막이 나중이다. 순서가 반대면 방금 새긴 자막이 잘려 나간다.
