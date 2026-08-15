@@ -184,14 +184,18 @@ check("모든 효과가 구간 지정을 필터에 넣는다",
 
 check("주변 어둡게는 **검은 그림을 알파로** 얹는다 (밝기만 곱하면 색이 튄다)",
       "format=yuva420p" in flt("spotlight") and "lum=16" in flt("spotlight")
-      and "overlay=0:0" in flt("spotlight")
-      and "c0_mode=multiply" not in flt("spotlight"),
+      and "overlay=0:0" in flt("spotlight"),
       "밝기(Y)만 줄이고 색차(U·V)를 두면 밝기에 견준 색이 커져 화면이 보라색이 된다")
 
-check("비·눈은 밝기 면만 얹고 색 면은 건드리지 않는다",
-      "c0_mode=screen" in flt("rain") and "c1_mode=normal" in flt("rain")
-      and "c2_mode=normal" in flt("rain") and "c1_opacity=0" not in flt("rain"),
-      "opacity=0 을 주면 색이 효과 그림의 중립값으로 덮여 화면이 흑백이 된다")
+check("비·눈은 **흰 그림을 알파로** 얹는다 (밝기만 올리면 빗줄기가 배경색을 머금는다)",
+      all("alphamerge" in flt(k) and "lutyuv=y=maxval" in flt(k)
+          and "format=yuva420p" in flt(k) and "overlay=0:0" in flt(k)
+          for k in ("rain", "snow")),
+      "흰색을 235 같은 숫자로 적으면 안 된다 — 필터 안의 밝기 자가 다르다")
+
+check("덧씌우는 효과에 blend 경로가 남아 있지 않다",
+      all("blend=" not in flt(k) for k in ("rain", "snow", "spotlight")),
+      "밝기 면만 섞던 옛 경로다. 색을 안 건드리는 것이 곧 결함이었다")
 
 check("주변 어둡게의 마스크는 작은 자에서 그린 뒤 늘린다 (geq 는 느리다)",
       "scale=160:" in flt("spotlight") and "flags=bicubic" in flt("spotlight"))
@@ -621,15 +625,31 @@ else:
         top, bottom = rgb.max(axis=2), rgb.min(axis=2)
         return float(((top - bottom) / np.maximum(top, 1.0)).mean())
 
+    def drop_colour(now, plain) -> float:
+        """**밝아진 자리만** 골라 색을 잰다 — 비·눈이 배경색을 머금는지 보는 자.
+
+        화면 전체로 재면 빗줄기가 차지하는 넓이가 작아 묻힌다. 그래서 풀밭 위의
+        빗줄기가 초록빛으로 보이는 동안에도 아무 검사가 안 걸렸다.
+        """
+        lit = (now.mean(axis=2) - plain.mean(axis=2)) > 12
+        if lit.sum() < 200:
+            return 0.0
+        picked = now[lit]
+        top, bottom = picked.max(axis=1), picked.min(axis=1)
+        return float(((top - bottom) / np.maximum(top, 1.0)).mean())
+
     # 효과마다 '가림'의 뜻이 다르므로 재는 자도 다르다.
     #   push   — 화면 전체 평균 밀림의 상한 (0~255 자)
     #   light  — '많이'에서도 남아 있어야 할 밝기 비율 (어둡게 하는 효과)
     #   tex    — 결이 얼마나 늘거나 줄어도 되는가 (비·눈은 결을 **더한다**)
     #   colour — 색이 얼마나 진해져도 되는가. **어둡게 하는 효과에만** 건다.
     #            색을 바꾸는 것이 목적인 효과(따뜻하게·빈티지…)에는 걸지 않는다
+    #   drop   — 빗줄기·눈송이가 배경색을 얼마나 머금어도 되는가. **밝히는 효과에만**.
+    #            실측: 밝기 면만 올리던 옛 방식 20.9%·18.6% → 알파 15.4%·13.3%.
+    #            17% 를 문턱으로 두면 두 방식이 갈린다
     LIMITS = {
-        "rain":     {"push": 18.0, "tex": (0.80, 1.40)},
-        "snow":     {"push": 18.0, "tex": (0.80, 1.40)},
+        "rain":     {"push": 18.0, "tex": (0.80, 1.40), "drop": 0.17},
+        "snow":     {"push": 18.0, "tex": (0.80, 1.40), "drop": 0.17},
         "spotlight": {"light": 0.62, "colour": 1.15},
         "vignette":  {"light": 0.62, "colour": 1.15},
         "warm":     {"push": 18.0},
@@ -710,6 +730,14 @@ else:
                     check(f"{label}: '많이'가 화면을 어수선하게 만들지 않는다",
                           low_t <= kept <= high_t,
                           f"남은 결 {kept * 100:.0f}% (허용 {low_t * 100:.0f}~{high_t * 100:.0f}%)")
+                if "drop" in rule:
+                    # 밝아진 자리가 흰색이어야 '비'로 보인다. 배경색을 머금으면
+                    # 풀밭 위에서 초록 빗줄기가 되는데, 그때도 화면 전체로 재는
+                    # 검사는 전부 통과했다.
+                    tint = drop_colour(seen["high"], ref)
+                    check(f"{label}: 빗줄기가 배경색을 머금지 않는다 (흰색으로 보인다)",
+                          0 < tint <= rule["drop"],
+                          f"밝아진 자리의 색 {tint * 100:.1f}% (상한 {rule['drop'] * 100:.0f}%)")
 
             # ── 5-2. 진하기(투명 정도)를 사용자가 정할 수 있는가 ──────────
             #

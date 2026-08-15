@@ -175,11 +175,35 @@ def _fall(height: int, speed: float) -> str:
 def _thickness(base: float, params: dict[str, Any]) -> float:
     """덧씌우는 그림을 얼마나 진하게 얹을 것인가 — 사용자가 정한 진하기를 곱한다.
 
-    빗줄기·눈송이는 흰 그림을 `screen` 으로 얹으므로 이 값이 곧 진하기다.
-    1을 넘으면 가장 밝은 자리는 더 못 밝아지지만(자의 끝), 흐림 때문에 생긴
-    중간 밝기의 자리들은 계속 진해지므로 200%까지도 실제로 달라진다.
+    빗줄기·눈송이는 이 값이 곧 **알파(투명도)** 가 된다. 1을 넘으면 가장 진한 자리는
+    더 진해질 수 없지만(자의 끝), 흐림 때문에 생긴 중간 밝기의 자리들은 계속
+    진해지므로 200%까지도 실제로 달라진다.
     """
     return round(base * max(0.0, float(params["opacity"]) / 100.0), 4)
+
+
+def _white_alpha(chain: str, tag: str) -> str:
+    """회색 그림을 **흰 그림 + 알파**로 바꾼다. 비·눈이 쓴다.
+
+    예전에는 이 회색 그림을 밝기 면에 `screen` 으로 얹었다. 색 면을 안 건드리니
+    구간 밖이 완벽히 보존되어 좋았지만, **밝아진 화소가 원래 색을 그대로 지녔다.**
+    그래서 풀밭 위의 빗줄기가 **초록빛**으로 보였다 — 흰 비가 아니라 '밝아진 풀'이
+    된 것이다. 진하기를 200%까지 올리면 눈에 띄게 드러났다.
+
+    알파로 얹으면 색도 함께 흰색 쪽으로 간다:
+
+        U_새 = U×(1-a) + 128×a = 128 + (U-128)×(1-a)
+
+    `alphamerge` 는 둘째 입력의 밝기를 첫째 입력의 알파로 삼는다. 그래서 지금 쓰던
+    회색 그림을 **한 글자도 안 고치고** 그대로 알파로 쓸 수 있다.
+
+    흰색은 `maxval` 로 적는다. 235 처럼 숫자로 적으면 안 된다 — 필터 안의 밝기 자가
+    화면에서 재는 자와 다르기 때문이다 (memory/ffmpeg-effect-layer-traps.md ③-c).
+    """
+    return (f"split=2[{tag}w][{tag}m];"
+            f"[{tag}w]lutyuv=y=maxval:u=128:v=128,format=yuva420p[{tag}white];"
+            f"[{tag}m]{chain}[{tag}mask];"
+            f"[{tag}white][{tag}mask]alphamerge")
 
 
 def _layer_rain(
@@ -191,21 +215,22 @@ def _layer_rain(
     잡으면 점 하나가 15배로 늘어나 세로 16픽셀 × 가로 1.0~1.5픽셀짜리 줄기가 된다
     (실측). 줄 수가 적어 점 개수도 알맞게 성기다.
     """
-    made: list[tuple[str, str, str]] = []
+    made: list[tuple[str, str]] = []
     for index, (strength, params, group) in enumerate(_by_setting(bars)):
         spec = KINDS["rain"]["strengths"][strength]
         tag = f"rn{index}"
         rows = _even_up(height / 15)
         speed = round(900 * params["speed"] / 100.0, 1)
         made.append((
-            _dots(width, rows, spec["density"], 1234 + index)
-            + "," + _tile3(tag)
-            + f",scale={width}:{3 * height}:flags=neighbor"
-            + ",gblur=sigma=0.8:sigmaV=3.0"          # 모서리만 살짝 눅인다
-            + f",crop={width}:{height}:0:{_fall(height, speed)}"
-            + f",lutyuv=y='val*{_thickness(spec['opacity'], params)}'",
+            _white_alpha(
+                _dots(width, rows, spec["density"], 1234 + index)
+                + "," + _tile3(tag)
+                + f",scale={width}:{3 * height}:flags=neighbor"
+                + ",gblur=sigma=0.8:sigmaV=3.0"      # 모서리만 살짝 눅인다
+                + f",crop={width}:{height}:0:{_fall(height, speed)}"
+                + f",lutyuv=y='val*{_thickness(spec['opacity'], params)}'",
+                tag),
             _enable(group),
-            "screen",
         ))
     return made
 
@@ -221,7 +246,7 @@ def _layer_snow(
     옆으로 흔들리려면 그림이 화면보다 **넓어야** 한다. 그만큼 넓게 만들어 두고
     가운데를 잘라 낸다.
     """
-    made: list[tuple[str, str, str]] = []
+    made: list[tuple[str, str]] = []
     for index, (strength, params, group) in enumerate(_by_setting(bars)):
         spec = KINDS["snow"]["strengths"][strength]
         gate = _enable(group)
@@ -237,15 +262,16 @@ def _layer_snow(
             cols = _even_up((width + 2 * sway) / factor)
             canvas = _even_up(cols * factor)
             made.append((
-                _dots(cols, rows, spec["density"] - 0.004 * (1 - depth), seed + index)
-                + "," + _tile3(tag)
-                + f",scale={canvas}:{3 * height}:flags=bicubic"
-                + f",crop={width}:{height}"
-                  f":'{(canvas - width) // 2}+{sway}*sin(2*PI*{round(hertz * pace, 4)}*t)'"
-                  f":{_fall(height, round(speed * pace, 1))}"
-                + f",lutyuv=y='val*{_thickness(spec['opacity'] * dim, params)}'",
+                _white_alpha(
+                    _dots(cols, rows, spec["density"] - 0.004 * (1 - depth), seed + index)
+                    + "," + _tile3(tag)
+                    + f",scale={canvas}:{3 * height}:flags=bicubic"
+                    + f",crop={width}:{height}"
+                      f":'{(canvas - width) // 2}+{sway}*sin(2*PI*{round(hertz * pace, 4)}*t)'"
+                      f":{_fall(height, round(speed * pace, 1))}"
+                    + f",lutyuv=y='val*{_thickness(spec['opacity'] * dim, params)}'",
+                    tag),
                 gate,
-                "screen",
             ))
     return made
 
@@ -413,7 +439,7 @@ def _build_box_mark(
 
 def _layer_spotlight(
     bars: list[dict[str, Any]], width: int, height: int, fps: float
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str]]:
     """주변 어둡게 — **검은 그림을 알파(투명도)로** 얹는다. 가운데는 투명하게 둔다.
 
     그림은 시간에 따라 변하지 않으므로 **작게 그려서 늘린다** — `geq` 는 픽셀마다
@@ -434,7 +460,7 @@ def _layer_spotlight(
 
     비·눈은 지금대로 밝기 면만 얹는다 — 흰 그림을 **밝히는** 쪽이라 색이 튀지 않는다.
     """
-    made: list[tuple[str, str, str]] = []
+    made: list[tuple[str, str]] = []
     for strength, params, group in _by_setting(bars):
         # 진하기는 **어두워지는 정도**에 곱한다. dim 자체에 곱하면 진하기를 올릴수록
         # 밝아지는 거꾸로 된 손잡이가 된다.
@@ -454,7 +480,6 @@ def _layer_spotlight(
             f"*exp(-1.6*pow(hypot((X-{cx})/{radius}\\,(Y-{cy})/{radius})\\,2))))',"
             f"scale={width}:{height}:flags=bicubic",
             _enable(group),
-            "alpha",
         ))
     return made
 
@@ -660,6 +685,10 @@ KINDS: dict[str, dict[str, Any]] = {
         # 기준을 스스로 어긴 것이라 다시 올렸다. 위아래 두 기준은 함께 재야 맞는다.
         # ⚠ density 는 **절벽처럼** 동작한다. 0.715 에서는 점이 남고 0.724 에서는
         # 하나도 안 남는다(실측). 그래서 개수는 좁게 움직이고 진하기로 단계를 벌린다.
+        #
+        # 2026-08-15 저녁에 합성을 **알파**로 바꿨지만 값은 그대로 두었다. 평균 밀림은
+        # 6.05 → 3.54 로 줄었어도 **남은 결은 136% → 132% 로 거의 같다** — 화면이
+        # 어수선해지는 정도는 그대로라는 뜻이다. 값을 올리면 결이 상한 140%를 넘는다.
         "strengths": {
             "low": {"density": 0.715, "opacity": 0.38},
             "medium": {"density": 0.708, "opacity": 0.52},
@@ -674,10 +703,18 @@ KINDS: dict[str, dict[str, Any]] = {
         "params": {"speed": _SPEED, "opacity": _OPACITY},
         # 비와 같은 이유로 2026-08-15 에 낮췄다 (옛 값 0.723/0.717/0.705 · 0.55/0.80/1.00
         # 은 '많이'가 화면의 24.4%를 밝혔다).
+        #
+        # ⚠ 같은 날 저녁에 합성을 **알파**로 바꾸면서 진하기를 올렸다
+        # (0.46/0.60/0.74 → 0.62/0.78/0.94). 알파는 눈송이를 순백으로 바꾸는데,
+        # 예전 `screen` 은 배경 밝기에 비례해 밝혔기 때문에 같은 값에서 세기가 약해진다.
+        # 그대로 두었더니 **'약하게'의 평균 밀림이 0.30 으로 바닥(0.3)에 딱 걸렸다.**
+        # 올린 뒤 0.50 / 2.16 / 7.01 이고 남은 결은 113% 다 (상한 140%).
+        # 비는 올리지 않았다 — 비는 결이 132%로 이미 상한에 가깝고, 값을 올리면
+        # 화면이 예전보다 더 어수선해진다.
         "strengths": {
-            "low": {"density": 0.723, "opacity": 0.46},
-            "medium": {"density": 0.717, "opacity": 0.60},
-            "high": {"density": 0.708, "opacity": 0.74},
+            "low": {"density": 0.723, "opacity": 0.62},
+            "medium": {"density": 0.717, "opacity": 0.78},
+            "high": {"density": 0.708, "opacity": 0.94},
         },
         "layer": _layer_snow,
     },
@@ -1040,54 +1077,35 @@ def normalize(items: Any, duration: float | None = None) -> list[dict[str, Any]]
     return cleaned
 
 
-# 밝기(Y) 면에만 screen 합성을 걸고 색(U·V) 면은 원본을 그대로 둔다.
-#
-# 이것이 이 파일에서 가장 중요한 한 줄이다. 색 면까지 합성하면 색이 중립값 쪽으로
-# 끌려가 **온 화면이 뿌예진다** (memory/ffmpeg-effect-layer-traps.md ③).
-# 조사 때는 모든 입력을 RGB(`format=gbrp`)로 바꿔서 피했지만, 그러면 효과를 켜는
-# 것만으로 **영상 전체의 색이 미세하게 변한다** — 실측으로 화소값의 31%가 달라졌고
-# 최대 49까지 밀렸다. 비도 눈도 흰색이라 밝기만 올리면 충분하므로, 색 면은 아예
-# 건드리지 않는 편이 낫다. 그래서 효과 구간 **바깥은 원본과 한 값도 다르지 않다.**
-def _luma_blend(mode: str) -> str:
-    """밝기 면만 합성한다. `screen` 은 밝히고(비·눈), `multiply` 는 어둡게 한다(주변 어둡게).
-
-    색(U·V) 면은 `normal` 로 두어 **원본 색을 그대로** 남긴다.
-
-    ⚠ `c1_opacity=0` 을 붙이면 안 된다. 붙였다가 **화면의 색이 통째로 사라졌다.**
-    blend 는 첫 입력이 '위', 둘째가 '아래'이고 계산은
-    `결과 = opacity × 섞은값 + (1-opacity) × 아래` 다. `normal` 의 섞은값은 '위'이므로
-    opacity 를 0 으로 두면 결과가 **'아래'(=효과 그림)** 가 된다. 효과 그림의 색 면은
-    중립값(128)이라 온 화면이 흑백이 된다. opacity 를 안 주면 기본값 1 이라 '위'
-    (=원본)가 그대로 남는다. 실측: 색의 진하기 126.1 → opacity=0 이면 0.0.
-    """
-    return f"blend=c0_mode={mode}:c1_mode=normal:c2_mode=normal"
-
-
-def _compose(layers: list[tuple[str, str, str]]) -> str:
+def _compose(layers: list[tuple[str, str]]) -> str:
     """덧씌울 그림들을 원본 위에 차례로 얹는 필터그래프를 만든다.
 
     원본을 그림 수 + 1 갈래로 나눠, 한 갈래는 바탕으로 두고 나머지 갈래마다
     그림을 만든 뒤 차례로 합성한다. 그림을 **원본에서 갈라 만드는** 이유는
     `color=` 같은 생성 필터가 **끝이 없는 스트림**이라 렌더가 영원히 안 끝나기
-    때문이다 (같은 문서 ④ — 30초 영상이 6분 40초가 지나도 안 끝났다).
-    원본에서 갈라 오면 길이가 원본과 같아 그 함정을 아예 만나지 않는다.
+    때문이다 (memory/ffmpeg-effect-layer-traps.md ④ — 30초 영상이 6분 40초가
+    지나도 안 끝났다). 원본에서 갈라 오면 길이가 원본과 같아 그 함정을 아예 만나지
+    않는다.
 
-    합성 방식은 그림이 정한다:
+    얹는 방법은 **알파(투명도) 합성 하나뿐**이다. 그림마다 알파를 그려 오면
+    `overlay` 한 줄로 끝난다.
 
-      · `screen`/`multiply` — 밝기 면만 섞는다. **밝히는** 비·눈이 쓴다
-      · `alpha`             — 알파를 가진 그림을 통째로 얹는다. **어둡게 하는**
-                              주변 어둡게가 쓴다. 밝기만 줄이면 색이 튄다
-                              (`_layer_spotlight` 설명 참고)
+    ⚠ 예전에는 `blend` 로 **밝기(Y) 면만** 섞고 색(U·V) 면은 원본을 그대로 두었다.
+    색 면까지 섞으면 화면이 뿌예지는 것을 피하려는 것이었고(같은 문서 ③), 구간 밖이
+    한 값도 안 달라지는 장점이 있었다. 그런데 **색을 안 건드리는 것이 곧 결함이었다** —
+    밝기만 바꾸면 '밝기에 견준 색'이 변해서, 어둡게 하면 화면이 보라색이 되고
+    밝히면 빗줄기가 배경색을 머금는다(같은 문서 ③-f). 알파 합성은 색차도 함께
+    데려가면서 **구간 밖 완전 일치도 그대로 지킨다**(실측 0개). 그래서 `blend` 경로는
+    통째로 걷어 냈다.
     """
     count = len(layers)
     lines = [f"split={count + 1}[fxbg]" + "".join(f"[fxin{i}]" for i in range(count))]
-    for index, (made, _gate, _mode) in enumerate(layers):
+    for index, (made, _gate) in enumerate(layers):
         lines.append(f"[fxin{index}]{made}[fxlay{index}]")
 
     source = "fxbg"
-    for index, (_made, gate, mode) in enumerate(layers):
-        joint = "overlay=0:0" if mode == "alpha" else _luma_blend(mode)
-        step = f"[{source}][fxlay{index}]{joint}"
+    for index, (_made, gate) in enumerate(layers):
+        step = f"[{source}][fxlay{index}]overlay=0:0"
         if gate:
             step += f":enable='{gate}'"
         if index < count - 1:
@@ -1131,7 +1149,7 @@ def build_filter(
         )
 
     parts: list[str] = []
-    layers: list[tuple[str, str, str]] = []
+    layers: list[tuple[str, str]] = []
 
     for name, spec in sorted(KINDS.items(), key=lambda kv: kv[1]["order"]):
         bars = [b for b in items if b.get("kind") == name]

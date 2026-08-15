@@ -121,13 +121,21 @@ for kind in WEATHER:
           "maxval,0)" in made,
           f"필터에서 찾은 곳: {'있음' if 'maxval,0)' in made else '없음'}")
 
-    check(f"{name}: 밝기 면에만 합성하고 색 면은 원본을 그대로 둔다",
-          "c0_mode=screen" in made and "c1_mode=normal" in made and "c2_mode=normal" in made)
+    # 2026-08-15 저녁에 합성 방식을 바꿨다. 예전에는 **밝기 면에만** screen 을 걸고
+    # 색 면은 원본을 그대로 두었는데, 그러면 밝아진 화소가 원래 색을 그대로 지녀
+    # **풀밭 위의 빗줄기가 초록빛**이 되었다. 흰 그림을 알파로 얹어 고쳤다.
+    check(f"{name}: 흰 그림을 **알파로** 얹는다 (밝기만 올리면 배경색을 머금는다)",
+          "alphamerge" in made and "lutyuv=y=maxval" in made
+          and "format=yuva420p" in made and "overlay=0:0" in made)
 
-    # 실제로 색을 지웠던 옵션이다. 다시 들어오면 화면이 통째로 흑백이 된다.
-    check(f"{name}: 색 면에 opacity=0 을 주지 않는다",
-          "c1_opacity=0" not in made and "c2_opacity=0" not in made,
-          "opacity=0 은 '아래(효과 그림)를 쓴다'는 뜻이라 색이 중립값으로 덮인다")
+    check(f"{name}: 흰색을 숫자가 아니라 maxval 로 적는다",
+          "lutyuv=y=235" not in made and "lutyuv=y=255" not in made,
+          "숫자로 적으면 화면 눈금(0~255)과 필터 눈금(16~235)이 어긋난다")
+
+    # 밝기 면만 섞던 옛 경로다. c1_opacity=0 은 실제로 색을 통째로 지운 적이 있다.
+    check(f"{name}: 옛 blend 경로가 남아 있지 않다",
+          "blend=" not in made and "c1_opacity=0" not in made,
+          "색을 안 건드리는 것이 곧 결함이었다")
 
     check(f"{name}: 색공간을 왕복시키지 않는다 (켜기만 해도 색이 변하면 안 된다)",
           "gbrp" not in made,
