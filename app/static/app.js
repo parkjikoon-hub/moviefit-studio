@@ -1294,7 +1294,7 @@ function addFxBar(kind) {
   snapshot();
   // id 는 서버가 저장할 때 다시 매긴다. 여기서는 화면에서 고르기 위한 임시 이름이다.
   const id = `fx-${Date.now()}`;
-  fxList().push({ id, kind, start, end, strength: "medium", params: {} });
+  fxList().push({ id, kind, start, end, strength: "medium", params: fxDefaults(kind) });
   fxSelectedId = id;
   renderTimelineAll(); syncFxPanel(); markDirty();
   const label = (fxKinds.find((k) => k.kind === kind) || {}).label || kind;
@@ -1401,6 +1401,60 @@ function syncFxPanel() {
   if (startBox) startBox.value = bar.start;
   if (endBox) endBox.value = bar.end;
   $$(".fx-strength").forEach((b) => b.classList.toggle("is-active", b.dataset.strength === bar.strength));
+  renderFxParams(bar, kind);
+}
+
+/** 효과의 기본값. 서버가 알려 준 설명서에서 가져온다. */
+function fxDefaults(kind) {
+  const spec = fxKinds.find((k) => k.kind === kind);
+  const out = {};
+  for (const p of (spec && spec.params) || []) out[p.key] = p.default;
+  return out;
+}
+
+/** 고른 막대의 값 슬라이더를 그린다.
+ *
+ * 효과마다 값이 다르므로 화면에 미리 만들어 둘 수 없다. 서버가 준 설명서
+ * (이름·최소·최대·기본값)만 보고 그리므로, 새 효과에 값을 붙여도 여기를 고칠 일이 없다. */
+function renderFxParams(bar, kind) {
+  const box = $("#fx-params");
+  if (!box) return;
+  const specs = (kind && kind.params) || [];
+  box.hidden = specs.length === 0;
+  box.innerHTML = "";
+  for (const spec of specs) {
+    const now = bar.params && bar.params[spec.key] != null ? bar.params[spec.key] : spec.default;
+    const row = document.createElement("label");
+    row.className = "fx-param";
+
+    const head = document.createElement("span");
+    head.className = "fx-param-head";
+    const title = document.createElement("span");
+    title.textContent = spec.label;
+    const shown = document.createElement("b");
+    shown.textContent = `${now}${spec.suffix || ""}`;
+    head.append(title, shown);
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = spec.min;
+    slider.max = spec.max;
+    slider.step = spec.step || 1;
+    slider.value = now;
+    slider.addEventListener("input", () => {
+      shown.textContent = `${slider.value}${spec.suffix || ""}`;
+    });
+    slider.addEventListener("change", () => {
+      const live = fxList().find((b) => b.id === fxSelectedId);
+      if (!live) return;
+      snapshot();
+      live.params = { ...(live.params || {}), [spec.key]: parseFloat(slider.value) };
+      markDirty();
+    });
+
+    row.append(head, slider);
+    box.append(row);
+  }
 }
 
 function wireFxPanel() {

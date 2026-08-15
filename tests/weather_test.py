@@ -122,7 +122,12 @@ for kind in WEATHER:
           f"필터에서 찾은 곳: {'있음' if 'maxval,0)' in made else '없음'}")
 
     check(f"{name}: 밝기 면에만 합성하고 색 면은 원본을 그대로 둔다",
-          "c0_mode=screen" in made and "c1_opacity=0" in made and "c2_opacity=0" in made)
+          "c0_mode=screen" in made and "c1_mode=normal" in made and "c2_mode=normal" in made)
+
+    # 실제로 색을 지웠던 옵션이다. 다시 들어오면 화면이 통째로 흑백이 된다.
+    check(f"{name}: 색 면에 opacity=0 을 주지 않는다",
+          "c1_opacity=0" not in made and "c2_opacity=0" not in made,
+          "opacity=0 은 '아래(효과 그림)를 쓴다'는 뜻이라 색이 중립값으로 덮인다")
 
     check(f"{name}: 색공간을 왕복시키지 않는다 (켜기만 해도 색이 변하면 안 된다)",
           "gbrp" not in made,
@@ -296,6 +301,23 @@ else:
             check(f"{name}: 안개가 끼지 않는다 (아무것도 없는 자리는 그대로)",
                   abs(median) <= 1.0,
                   f"화면 전체 밝기 변화의 중앙값 {median:+.1f} (0이어야 정상)")
+
+            # ── 색이 살아 있는가.
+            #    이 점검이 없어서 **화면이 통째로 흑백이 되는 결함을 놓쳤다.**
+            #    위의 검사들은 전부 흑백으로 재기 때문에 색이 사라져도 다 통과한다.
+            def colour(video, at):
+                dst = work / "_c.png"
+                dst.unlink(missing_ok=True)
+                subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                                "-nostdin", "-ss", f"{at}", "-i", str(video),
+                                "-frames:v", "1", str(dst)], capture_output=True, timeout=120)
+                rgb = np.array(Image.open(dst).convert("RGB")).astype(np.int16)
+                return float(np.abs(rgb[:, :, 0] - rgb[:, :, 2]).mean())
+
+            was, now = colour(plain, 3.0), colour(made, 3.0)
+            check(f"{name}: 색이 살아 있다 (화면이 흑백이 되지 않는다)",
+                  now > was * 0.75,
+                  f"색의 진하기 {was:.1f} → {now:.1f} (샘플은 컬러바 영상이다)")
 
             # ── 내리는가.
             #    **효과가 밝힌 자리만** 떼어 내서 본다. 합성된 영상을 통째로 보면

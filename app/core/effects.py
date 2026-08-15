@@ -32,17 +32,27 @@ def _fps_text(fps: float) -> str:
     return f"{float(fps):g}"
 
 
-def _by_strength(bars: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
-    """막대를 세기별로 묶는다. 세기가 같으면 **그림 한 장을 같이 쓴다.**
+def _by_setting(
+    bars: list[dict[str, Any]],
+) -> list[tuple[str, dict[str, Any], list[dict[str, Any]]]]:
+    """막대를 **세기와 값이 같은 것끼리** 묶는다.
 
-    막대 하나마다 그림을 따로 만들면 막대를 열 개 놓았을 때 화면을 열 번 다시
-    그려 그만큼 느려진다. 세기는 세 가지뿐이므로 아무리 많이 놓아도 그림은
-    최대 세 장이다.
+    묶는 이유: 설정이 같으면 필터도 같으므로 **한 번만 만들어 여러 구간에 켠다.**
+    막대 하나마다 따로 만들면 막대를 열 개 놓았을 때 화면을 열 번 다시 그려
+    그만큼 느려진다.
+
+    돌려주는 것: (세기, 값, 그 설정을 쓰는 막대들) 의 목록.
     """
-    groups: dict[str, list[dict[str, Any]]] = {}
+    groups: dict[tuple, tuple[str, dict[str, Any], list[dict[str, Any]]]] = {}
     for bar in bars:
-        groups.setdefault(bar["strength"], []).append(bar)
-    return [(name, groups[name]) for name in STRENGTHS if name in groups]
+        params = dict(bar.get("params") or {})
+        key = (bar["strength"], tuple(sorted(params.items())))
+        if key not in groups:
+            groups[key] = (bar["strength"], params, [])
+        groups[key][2].append(bar)
+
+    rank = {name: index for index, name in enumerate(STRENGTHS)}
+    return sorted(groups.values(), key=lambda g: (rank.get(g[0], 9), sorted(g[1].items())))
 
 
 def _enable(bars: list[dict[str, Any]]) -> str:
@@ -168,19 +178,21 @@ def _layer_rain(
     잡으면 점 하나가 15배로 늘어나 세로 16픽셀 × 가로 1.0~1.5픽셀짜리 줄기가 된다
     (실측). 줄 수가 적어 점 개수도 알맞게 성기다.
     """
-    made: list[tuple[str, str]] = []
-    for index, (strength, group) in enumerate(_by_strength(bars)):
+    made: list[tuple[str, str, str]] = []
+    for index, (strength, params, group) in enumerate(_by_setting(bars)):
         spec = KINDS["rain"]["strengths"][strength]
         tag = f"rn{index}"
         rows = _even_up(height / 15)
+        speed = round(900 * params["speed"] / 100.0, 1)
         made.append((
             _dots(width, rows, spec["density"], 1234 + index)
             + "," + _tile3(tag)
             + f",scale={width}:{3 * height}:flags=neighbor"
             + ",gblur=sigma=0.8:sigmaV=3.0"          # 모서리만 살짝 눅인다
-            + f",crop={width}:{height}:0:{_fall(height, 900)}"
+            + f",crop={width}:{height}:0:{_fall(height, speed)}"
             + f",lutyuv=y='val*{spec['opacity']}'",
             _enable(group),
+            "screen",
         ))
     return made
 
@@ -196,10 +208,11 @@ def _layer_snow(
     옆으로 흔들리려면 그림이 화면보다 **넓어야** 한다. 그만큼 넓게 만들어 두고
     가운데를 잘라 낸다.
     """
-    made: list[tuple[str, str]] = []
-    for index, (strength, group) in enumerate(_by_strength(bars)):
+    made: list[tuple[str, str, str]] = []
+    for index, (strength, params, group) in enumerate(_by_setting(bars)):
         spec = KINDS["snow"]["strengths"][strength]
         gate = _enable(group)
+        pace = params["speed"] / 100.0
         # (늘리는 배수, 떨어지는 속도, 흔들리는 폭, 흔들리는 빠르기, 씨앗, 밝기 배수)
         for depth, (grow, speed, sway, hertz, seed, dim) in enumerate((
             (5, 70, 26, 0.17, 4242, 0.55),      # 뒤 — 작고 느리고 흐리게
@@ -215,12 +228,160 @@ def _layer_snow(
                 + "," + _tile3(tag)
                 + f",scale={canvas}:{3 * height}:flags=bicubic"
                 + f",crop={width}:{height}"
-                  f":'{(canvas - width) // 2}+{sway}*sin(2*PI*{hertz}*t)'"
-                  f":{_fall(height, speed)}"
+                  f":'{(canvas - width) // 2}+{sway}*sin(2*PI*{round(hertz * pace, 4)}*t)'"
+                  f":{_fall(height, round(speed * pace, 1))}"
                 + f",lutyuv=y='val*{round(spec['opacity'] * dim, 4)}'",
                 gate,
+                "screen",
             ))
     return made
+
+
+# ── 색을 바꾸는 효과 · 자리를 정하는 효과 ────────────────────
+
+
+def _build_look(bars: list[dict[str, Any]], width: int, height: int, fps: float) -> str:
+    """등록표에 **필터 문자열을 그대로 적어 둔** 효과들을 만든다.
+
+    색감 프리셋과 비네트처럼 "세기마다 정해진 모양"이 있는 것들이다. 계산으로
+    풀어 쓰지 않고 세기별 필터를 등록표에 직접 적는다 — 무엇이 걸리는지 한눈에
+    보이고, 값을 손보려면 그 줄만 고치면 된다.
+    """
+    kind = bars[0]["kind"]
+    parts: list[str] = []
+    for strength, _params, group in _by_setting(bars):
+        gate = _enable(group)
+        for one in KINDS[kind]["strengths"][strength]["look"]:
+            parts.append(f"{one}:enable='{gate}'")
+    return ",".join(parts)
+
+
+def _build_color_adjust(
+    bars: list[dict[str, Any]], width: int, height: int, fps: float
+) -> str:
+    """밝기·대비·채도 — 사용자가 슬라이더로 직접 정한다.
+
+    세기는 슬라이더를 **얼마나 세게 반영할지**를 정한다. 슬라이더가 이미 있는데
+    세기까지 있는 것이 겹쳐 보이지만, 세기 3단계는 모든 효과가 갖는 공통 손잡이라
+    빼면 화면이 효과마다 달라진다.
+    """
+    parts: list[str] = []
+    for strength, params, group in _by_setting(bars):
+        amount = KINDS["color_adjust"]["strengths"][strength]["amount"]
+        bright = round(params["brightness"] / 100.0 * amount, 4)
+        contrast = round(max(0.0, 1.0 + (params["contrast"] - 100) / 100.0 * amount), 4)
+        colour = round(max(0.0, 1.0 + (params["saturation"] - 100) / 100.0 * amount), 4)
+        parts.append(
+            f"eq=brightness={bright}:contrast={contrast}:saturation={colour}"
+            f":enable='{_enable(group)}'"
+        )
+    return ",".join(parts)
+
+
+def _even_down(value: float) -> int:
+    """내림한 뒤 짝수로 맞춘다. 음수는 0으로 본다.
+
+    **최소값을 2로 두면 안 된다.** 자리(x·y)는 0이 정상이기 때문이다. 처음에 크기와
+    자리에 같은 함수를 쓰면서 최소 2를 강제했더니, 네모를 화면 맨 왼쪽에 붙여도
+    x=2 가 되어 2픽셀씩 떠 있었다. 크기 쪽에서만 따로 2 아래로 안 내려가게 막는다.
+    """
+    number = max(0, int(value))
+    return number - (number & 1)
+
+
+def _rect(params: dict[str, Any], width: int, height: int) -> tuple[int, int, int, int]:
+    """가운데 위치(%)와 크기(%)를 화면 안의 실제 네모로 바꾼다.
+
+    사용자는 "가로 40% 자리에 너비 30%"처럼 **화면 비율로** 정한다. 픽셀로 정하면
+    영상 크기가 바뀔 때마다 자리가 어긋난다. 네모가 화면 밖으로 나가지 않게 민다.
+    """
+    box_w = max(2, min(_even_down(width * params["w"] / 100.0), _even_down(width)))
+    box_h = max(2, min(_even_down(height * params["h"] / 100.0), _even_down(height)))
+    left = _even_down(width * params["x"] / 100.0 - box_w / 2)
+    top = _even_down(height * params["y"] / 100.0 - box_h / 2)
+    return (max(0, min(width - box_w, left)), max(0, min(height - box_h, top)),
+            box_w, box_h)
+
+
+def _build_blur_area(
+    bars: list[dict[str, Any]], width: int, height: int, fps: float
+) -> str:
+    """부분 흐림 — 정한 네모만 오려서 흐린 뒤 제자리에 도로 얹는다.
+
+    화면 전체를 흐린 뒤 마스크로 되살리는 것보다 훨씬 싸다. 흐리는 넓이가
+    네모 하나로 줄기 때문이다.
+    """
+    parts: list[str] = []
+    for index, (strength, params, group) in enumerate(_by_setting(bars)):
+        left, top, box_w, box_h = _rect(params, width, height)
+        # 흐림 반지름이 네모보다 크면 FFmpeg 이 거부한다. 네모에 맞춰 줄인다.
+        radius = KINDS["blur_area"]["strengths"][strength]["radius"]
+        radius = max(1, min(radius, min(box_w, box_h) // 4))
+        tag = f"bz{index}"
+        parts.append(
+            f"split=2[{tag}bg][{tag}zn];"
+            f"[{tag}zn]crop={box_w}:{box_h}:{left}:{top},boxblur={radius}:2[{tag}fx];"
+            f"[{tag}bg][{tag}fx]overlay={left}:{top}:enable='{_enable(group)}'"
+        )
+    return ",".join(parts)
+
+
+def _build_box_mark(
+    bars: list[dict[str, Any]], width: int, height: int, fps: float
+) -> str:
+    """네모 테두리 — "여기 보세요" 표시. FFmpeg 내장 `drawbox` 라 거의 공짜다."""
+    parts: list[str] = []
+    for strength, params, group in _by_setting(bars):
+        left, top, box_w, box_h = _rect(params, width, height)
+        thick = max(2, round(height * KINDS["box_mark"]["strengths"][strength]["thick"]))
+        parts.append(
+            f"drawbox=x={left}:y={top}:w={box_w}:h={box_h}"
+            f":color=yellow@0.95:t={thick}:enable='{_enable(group)}'"
+        )
+    return ",".join(parts)
+
+
+def _layer_spotlight(
+    bars: list[dict[str, Any]], width: int, height: int, fps: float
+) -> list[tuple[str, str, str]]:
+    """주변 어둡게 — 가운데만 밝은 그림을 만들어 **곱하기**로 합성한다.
+
+    곱하기는 `screen` 의 반대다. 그림이 255면 그대로 두고, 낮으면 그만큼 어두워진다.
+    그림은 시간에 따라 변하지 않으므로 **작게 그려서 늘린다** — `geq` 는 픽셀마다
+    식을 계산해 느린데, 작은 자에서만 쓰면 부담이 없고 늘리면 저절로 부드러워진다.
+    """
+    made: list[tuple[str, str, str]] = []
+    for strength, params, group in _by_setting(bars):
+        dim = KINDS["spotlight"]["strengths"][strength]["dim"]
+        small_w = 160
+        small_h = _even_up(small_w * height / width)
+        cx = round(small_w * params["x"] / 100.0, 2)
+        cy = round(small_h * params["y"] / 100.0, 2)
+        radius = round(max(6.0, small_w * params["size"] / 100.0), 2)
+        made.append((
+            f"scale={small_w}:{small_h},"
+            f"geq=lum='255*({dim}+{round(1 - dim, 4)}"
+            f"*exp(-1.6*pow(hypot((X-{cx})/{radius}\\,(Y-{cy})/{radius})\\,2)))'"
+            f":cb=128:cr=128,"
+            f"scale={width}:{height}:flags=bicubic",
+            _enable(group),
+            "multiply",
+        ))
+    return made
+
+
+def _slider(label: str, default: float, low: float, high: float,
+            step: float = 1, suffix: str = "%") -> dict[str, Any]:
+    """화면에 슬라이더 하나를 그리기 위한 설명서."""
+    return {"label": label, "min": low, "max": high,
+            "step": step, "default": default, "suffix": suffix}
+
+
+_SPEED = _slider("떨어지는 속도", 100, 30, 250, 5)
+_PLACE = {"x": _slider("가로 자리", 50, 0, 100),
+          "y": _slider("세로 자리", 50, 0, 100)}
+_SIZE = {"w": _slider("너비", 35, 5, 100),
+         "h": _slider("높이", 35, 5, 100)}
 
 
 # ── 효과 등록표 ────────────────────────────────────────────
@@ -255,7 +416,7 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "비",
         "hint": "가느다란 빗줄기가 내립니다. 차분하거나 쓸쓸한 장면에 씁니다.",
         "order": 20,
-        "params": {},
+        "params": {"speed": _SPEED},
         # density = 점으로 남길 문턱값(밝기 범위의 몇 %). **낮을수록 점이 많다.**
         # opacity = 레이어를 얼마나 진하게 얹을 것인가.
         # 둘을 함께 움직여야 단계가 벌어진다 — 덕킹에서 값 하나만 움직였다가
@@ -272,7 +433,7 @@ KINDS: dict[str, dict[str, Any]] = {
         "label": "눈",
         "hint": "둥근 눈송이가 좌우로 흔들리며 천천히 내립니다.",
         "order": 21,
-        "params": {},
+        "params": {"speed": _SPEED},
         # 실측(1280×720): 화면의 2.7% → 7.0% → 20.9%. 2.56배 · 2.99배.
         "strengths": {
             "low": {"density": 0.723, "opacity": 0.55},
@@ -281,17 +442,177 @@ KINDS: dict[str, dict[str, Any]] = {
         },
         "layer": _layer_snow,
     },
+    "blur_area": {
+        "label": "부분 흐림",
+        "hint": "정한 네모 안만 뭉갭니다. 얼굴이나 개인정보를 가릴 때 씁니다.",
+        "order": 30,
+        "params": {**_PLACE, **_SIZE},
+        "strengths": {
+            "low": {"radius": 6},
+            "medium": {"radius": 14},
+            "high": {"radius": 26},
+        },
+        "build": _build_blur_area,
+    },
+    "spotlight": {
+        "label": "주변 어둡게",
+        "hint": "정한 곳만 밝게 두고 둘레를 어둡게 합니다. 한 곳을 보게 할 때 씁니다.",
+        "order": 40,
+        "params": {**_PLACE, "size": _slider("밝은 부분 크기", 35, 8, 90)},
+        # dim = 바깥의 밝기 비율. 작을수록 어둡다.
+        "strengths": {
+            "low": {"dim": 0.55},
+            "medium": {"dim": 0.35},
+            "high": {"dim": 0.18},
+        },
+        "layer": _layer_spotlight,
+    },
+    "vignette": {
+        "label": "가장자리 어둡게",
+        "hint": "네 귀퉁이를 부드럽게 어둡게 해 가운데로 시선을 모읍니다.",
+        "order": 45,
+        "params": {},
+        "strengths": {
+            "low": {"look": ["vignette=a=PI/6"]},
+            "medium": {"look": ["vignette=a=PI/4"]},
+            "high": {"look": ["vignette=a=PI/3"]},
+        },
+        "build": _build_look,
+    },
+    "color_adjust": {
+        "label": "밝기·대비·채도",
+        "hint": "화면의 밝기와 또렷함, 색의 진하기를 직접 조절합니다.",
+        "order": 60,
+        "params": {
+            "brightness": _slider("밝기", 0, -100, 100, 1, ""),
+            "contrast": _slider("대비(또렷함)", 100, 0, 200),
+            "saturation": _slider("채도(색의 진하기)", 100, 0, 200),
+        },
+        # amount = 슬라이더를 얼마나 세게 반영할지
+        "strengths": {
+            "low": {"amount": 0.6},
+            "medium": {"amount": 1.0},
+            "high": {"amount": 1.5},
+        },
+        "build": _build_color_adjust,
+    },
+    "warm": {
+        "label": "따뜻하게",
+        "hint": "붉은기를 올려 노을처럼 따뜻한 색으로 바꿉니다.",
+        "order": 70,
+        "params": {},
+        # eq 를 **앞에** 둔다. 뒤에 두면 구간 밖까지 화소값이 ±2 밀린다 — 색을 다루는
+        # 필터(colorbalance)는 RGB 로, eq 는 YUV 로 일하기 때문에 사이에 변환이 끼는데,
+        # 그 변환은 효과가 꺼져 있어도 일어난다. 순서만 바꾸면 차이가 0이 된다(실측).
+        # ⚠ `colorbalance` 는 그림자(`rs`)·중간톤(`rm`)·밝은톤(`rh`)을 **따로** 받는다.
+        # 처음에 그림자만 지정했더니 밝은 사진에서는 손댈 자리가 없어 **아무 일도
+        # 일어나지 않았다.** 중립 회색에 걸어 재 보니 따뜻하게가 +1.0, 차갑게가 0.0 —
+        # 이름만 있는 가짜 선택지였다. 세 톤을 모두 지정해 +11 / +25 / +43 으로 벌렸다.
+        "strengths": {
+            "low": {"look": [
+                "eq=saturation=1.06",
+                "colorbalance=rs=0.05:rm=0.07:rh=0.03:bs=-0.04:bm=-0.07:bh=-0.03"]},
+            "medium": {"look": [
+                "eq=saturation=1.12",
+                "colorbalance=rs=0.10:rm=0.14:rh=0.07:bs=-0.08:bm=-0.14:bh=-0.07"]},
+            "high": {"look": [
+                "eq=saturation=1.22",
+                "colorbalance=rs=0.17:rm=0.24:rh=0.12:bs=-0.14:bm=-0.24:bh=-0.12"]},
+        },
+        "build": _build_look,
+    },
+    "cool": {
+        "label": "차갑게",
+        "hint": "푸른기를 올려 새벽처럼 차분하고 서늘한 색으로 바꿉니다.",
+        "order": 71,
+        "params": {},
+        # 따뜻하게와 같은 이유로 세 톤을 모두 지정한다. 중립 회색에서 -12 / -25 / -41.
+        "strengths": {
+            "low": {"look": [
+                "colorbalance=rs=-0.04:rm=-0.06:rh=-0.03:bs=0.05:bm=0.08:bh=0.04"]},
+            "medium": {"look": [
+                "colorbalance=rs=-0.08:rm=-0.12:rh=-0.06:bs=0.10:bm=0.16:bh=0.08"]},
+            "high": {"look": [
+                "colorbalance=rs=-0.14:rm=-0.20:rh=-0.10:bs=0.17:bm=0.27:bh=0.13"]},
+        },
+        "build": _build_look,
+    },
+    "vivid": {
+        "label": "선명하게",
+        "hint": "색을 진하게, 명암을 또렷하게 만듭니다.",
+        "order": 72,
+        "params": {},
+        "strengths": {
+            "low": {"look": ["eq=saturation=1.20:contrast=1.07"]},
+            "medium": {"look": ["eq=saturation=1.45:contrast=1.18"]},
+            "high": {"look": ["eq=saturation=1.75:contrast=1.30"]},
+        },
+        "build": _build_look,
+    },
+    "vintage": {
+        "label": "빈티지",
+        "hint": "빛바랜 옛날 사진처럼 누런 기가 도는 색으로 바꿉니다.",
+        "order": 73,
+        "params": {},
+        # 원래 색과 세피아를 섞은 비율이다 (0.45 / 0.70 / 1.00).
+        # 따뜻하게와 같은 이유로 eq 를 **앞에** 둔다.
+        "strengths": {
+            "low": {"look": [
+                "eq=contrast=1.04",
+                "colorchannelmixer=rr=0.727:rg=0.346:rb=0.085"
+                ":gr=0.157:gg=0.859:gb=0.076:br=0.122:bg=0.240:bb=0.609"]},
+            "medium": {"look": [
+                "eq=contrast=1.07",
+                "colorchannelmixer=rr=0.575:rg=0.538:rb=0.132"
+                ":gr=0.244:gg=0.780:gb=0.118:br=0.190:bg=0.374:bb=0.392"]},
+            "high": {"look": [
+                "eq=contrast=1.10:brightness=0.02",
+                "colorchannelmixer=rr=0.393:rg=0.769:rb=0.189"
+                ":gr=0.349:gg=0.686:gb=0.168:br=0.272:bg=0.534:bb=0.131"]},
+        },
+        "build": _build_look,
+    },
+    "mono": {
+        "label": "흑백",
+        "hint": "색을 빼 흑백으로 만듭니다. 많이로 하면 명암이 더 강해집니다.",
+        "order": 74,
+        "params": {},
+        "strengths": {
+            "low": {"look": ["hue=s=0.35"]},
+            "medium": {"look": ["hue=s=0"]},
+            "high": {"look": ["hue=s=0", "eq=contrast=1.25"]},
+        },
+        "build": _build_look,
+    },
+    "box_mark": {
+        "label": "네모 테두리",
+        "hint": "노란 네모로 한 곳을 짚어 줍니다. \"여기 보세요\" 표시입니다.",
+        # 맨 마지막에 그린다 — 색감 프리셋이 표시까지 물들이면 안 되기 때문이다.
+        "order": 90,
+        "params": {**_PLACE, **_SIZE},
+        # 화면 높이에 대한 비율. 720에서 3 / 6 / 10 픽셀이 된다.
+        "strengths": {
+            "low": {"thick": 0.004},
+            "medium": {"thick": 0.008},
+            "high": {"thick": 0.014},
+        },
+        "build": _build_box_mark,
+    },
 }
 
 
 def kind_list() -> list[dict[str, Any]]:
-    """화면에 보여 줄 효과 종류 목록 (만드는 함수는 빼고 넘긴다)."""
+    """화면에 보여 줄 효과 종류 목록 (만드는 함수는 빼고 넘긴다).
+
+    `params` 를 **막대 하나짜리 설명서**로 넘긴다. 화면은 이 설명서만 보고 슬라이더를
+    그리므로, 새 효과에 값을 붙여도 화면 코드를 고칠 필요가 없다.
+    """
     return [
         {
             "kind": name,
             "label": spec["label"],
             "hint": spec["hint"],
-            "params": dict(spec["params"]),
+            "params": [{"key": key, **detail} for key, detail in spec["params"].items()],
             "strengths": [
                 {"value": s, "label": STRENGTH_LABELS[s]} for s in STRENGTHS
             ],
@@ -300,23 +621,29 @@ def kind_list() -> list[dict[str, Any]]:
     ]
 
 
+def defaults_for(kind: str) -> dict[str, float]:
+    """그 효과의 값 기본값. 화면이 막대를 새로 만들 때 쓴다."""
+    return {key: detail["default"] for key, detail in KINDS.get(kind, {}).get("params", {}).items()}
+
+
 def _clean_params(kind: str, raw: Any) -> dict[str, Any]:
-    """등록표에 적힌 열쇠만 남기고, 숫자는 0~100 안으로 다듬는다."""
-    defaults = KINDS[kind]["params"]
+    """등록표에 적힌 값만 남기고 **각자의 범위** 안으로 다듬는다.
+
+    범위를 값마다 따로 두는 이유: 속도는 30~250%, 위치는 0~100%, 밝기는 -100~100 처럼
+    자가 제각각이다. 예전처럼 전부 0~100 으로 자르면 속도를 100 위로 못 올린다.
+    """
+    specs = KINDS[kind]["params"]
     given = raw if isinstance(raw, dict) else {}
     out: dict[str, Any] = {}
-    for key, fallback in defaults.items():
-        value = given.get(key, fallback)
-        if isinstance(fallback, (int, float)):
-            try:
-                number = float(value)
-            except (TypeError, ValueError):
-                number = float(fallback)
-            if not math.isfinite(number):
-                number = float(fallback)
-            out[key] = round(max(0.0, min(100.0, number)), 2)
-        else:
-            out[key] = value
+    for key, detail in specs.items():
+        fallback = float(detail["default"])
+        try:
+            number = float(given.get(key, fallback))
+        except (TypeError, ValueError):
+            number = fallback
+        if not math.isfinite(number):
+            number = fallback
+        out[key] = round(max(float(detail["min"]), min(float(detail["max"]), number)), 2)
     return out
 
 
@@ -388,13 +715,22 @@ def normalize(items: Any, duration: float | None = None) -> list[dict[str, Any]]
 # 것만으로 **영상 전체의 색이 미세하게 변한다** — 실측으로 화소값의 31%가 달라졌고
 # 최대 49까지 밀렸다. 비도 눈도 흰색이라 밝기만 올리면 충분하므로, 색 면은 아예
 # 건드리지 않는 편이 낫다. 그래서 효과 구간 **바깥은 원본과 한 값도 다르지 않다.**
-_LUMA_SCREEN = (
-    "blend=c0_mode=screen:c1_mode=normal:c2_mode=normal"
-    ":c1_opacity=0:c2_opacity=0"
-)
+def _luma_blend(mode: str) -> str:
+    """밝기 면만 합성한다. `screen` 은 밝히고(비·눈), `multiply` 는 어둡게 한다(주변 어둡게).
+
+    색(U·V) 면은 `normal` 로 두어 **원본 색을 그대로** 남긴다.
+
+    ⚠ `c1_opacity=0` 을 붙이면 안 된다. 붙였다가 **화면의 색이 통째로 사라졌다.**
+    blend 는 첫 입력이 '위', 둘째가 '아래'이고 계산은
+    `결과 = opacity × 섞은값 + (1-opacity) × 아래` 다. `normal` 의 섞은값은 '위'이므로
+    opacity 를 0 으로 두면 결과가 **'아래'(=효과 그림)** 가 된다. 효과 그림의 색 면은
+    중립값(128)이라 온 화면이 흑백이 된다. opacity 를 안 주면 기본값 1 이라 '위'
+    (=원본)가 그대로 남는다. 실측: 색의 진하기 126.1 → opacity=0 이면 0.0.
+    """
+    return f"blend=c0_mode={mode}:c1_mode=normal:c2_mode=normal"
 
 
-def _compose(layers: list[tuple[str, str]]) -> str:
+def _compose(layers: list[tuple[str, str, str]]) -> str:
     """덧씌울 그림들을 원본 위에 차례로 얹는 필터그래프를 만든다.
 
     원본을 그림 수 + 1 갈래로 나눠, 한 갈래는 바탕으로 두고 나머지 갈래마다
@@ -405,12 +741,12 @@ def _compose(layers: list[tuple[str, str]]) -> str:
     """
     count = len(layers)
     lines = [f"split={count + 1}[fxbg]" + "".join(f"[fxin{i}]" for i in range(count))]
-    for index, (made, _gate) in enumerate(layers):
+    for index, (made, _gate, _mode) in enumerate(layers):
         lines.append(f"[fxin{index}]{made}[fxlay{index}]")
 
     source = "fxbg"
-    for index, (_made, gate) in enumerate(layers):
-        step = f"[{source}][fxlay{index}]{_LUMA_SCREEN}"
+    for index, (_made, gate, mode) in enumerate(layers):
+        step = f"[{source}][fxlay{index}]{_luma_blend(mode)}"
         if gate:
             step += f":enable='{gate}'"
         if index < count - 1:

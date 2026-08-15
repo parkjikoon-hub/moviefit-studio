@@ -754,6 +754,14 @@ body.is-resizing .splitter { pointer-events: auto; }
 .fx-strength { flex: 1; padding: 7px 4px; font-size: 12.5px; }
 .fx-strength.is-active { background: var(--accent); color: var(--cream-ink); }
 
+/* 효과마다 다른 값(속도·자리·밝기). 서버가 준 설명서대로 개수가 달라진다. */
+.fx-params { margin-top: 9px; display: flex; flex-direction: column; gap: 7px; }
+.fx-param { display: block; }
+.fx-param-head { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--ink-soft); margin-bottom: 2px; }
+.fx-param-head b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.fx-param input[type="range"] { width: 100%; margin: 0; }
+
 /* A-B 구간 반복 표시 */
 .tl-ab { position: absolute; top: 22px; bottom: 0; background: rgba(251,191,36,.16); border-left: 2px solid var(--warn); border-right: 2px solid var(--warn); pointer-events: none; z-index: 2; }
 

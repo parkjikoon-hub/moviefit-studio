@@ -255,8 +255,60 @@ try:
             check(f"[{label}] 지우면 사라진다",
                   page.eval_on_selector_all(".tl-fx", "els => els.length") == 0)
 
+        # ── 효과마다 다른 값(슬라이더)이 화면에 나오는가 ──────
+        #    슬라이더는 서버가 준 설명서대로 그려진다. 효과를 고를 때마다 개수와
+        #    이름이 달라져야 하고, 값이 없는 효과에서는 칸 자체가 숨어야 한다.
+        print("\n=== 8. 효과마다 다른 값 슬라이더 ===")
+
+        def put(label):
+            page.evaluate("document.querySelector('#player').currentTime = 1.0")
+            page.wait_for_timeout(150)
+            page.locator(f'#fx-kinds button:has-text("{label}")').first.click()
+            page.wait_for_timeout(350)
+
+        put("비")
+        names = page.eval_on_selector_all(
+            "#fx-params .fx-param-head span:first-child", "els => els.map(e => e.textContent)")
+        check("비를 고르면 속도 슬라이더가 나온다", names == ["떨어지는 속도"], f"실제 {names}")
+
+        shown = page.eval_on_selector("#fx-params .fx-param-head b", "e => e.textContent")
+        check("슬라이더 옆에 지금 값이 보인다", shown == "100%", f"실제 {shown!r}")
+
+        page.eval_on_selector("#fx-params input[type=range]", """(el) => {
+          el.value = '180';
+          el.dispatchEvent(new Event('input', {bubbles: true}));
+          el.dispatchEvent(new Event('change', {bubbles: true}));
+        }""")
+        page.wait_for_timeout(250)
+        moved = page.evaluate("project.effects[0].params.speed")
+        check("슬라이더를 옮기면 저장값이 바뀐다", moved == 180, f"실제 {moved}")
+        check("옮긴 값이 화면에도 바로 보인다",
+              page.eval_on_selector("#fx-params .fx-param-head b", "e => e.textContent") == "180%")
+
+        page.locator("#fx-delete").click()
+        page.wait_for_timeout(200)
+
+        put("주변 어둡게")
+        names = page.eval_on_selector_all(
+            "#fx-params .fx-param-head span:first-child", "els => els.map(e => e.textContent)")
+        check("효과를 바꾸면 슬라이더 목록도 바뀐다",
+              names == ["가로 자리", "세로 자리", "밝은 부분 크기"], f"실제 {names}")
+        check("새 막대는 기본값을 갖고 태어난다",
+              page.evaluate("JSON.stringify(project.effects[0].params)")
+              == '{"x":50,"y":50,"size":35}',
+              f"실제 {page.evaluate('JSON.stringify(project.effects[0].params)')}")
+        page.locator("#fx-delete").click()
+        page.wait_for_timeout(200)
+
+        put("가장자리 어둡게")
+        check("값이 없는 효과에서는 슬라이더 칸이 숨는다",
+              page.locator("#fx-params").is_hidden()
+              or page.eval_on_selector_all("#fx-params .fx-param", "els => els.length") == 0)
+        page.locator("#fx-delete").click()
+        page.wait_for_timeout(200)
+
         # ── 자바스크립트 오류 ────────────────────────────────
-        print("\n=== 8. 자바스크립트 오류 ===")
+        print("\n=== 9. 자바스크립트 오류 ===")
         real = [e for e in errors if "no sw" not in e and "favicon" not in e]
         check("자바스크립트 오류가 하나도 없다", not real,
               "없음" if not real else " / ".join(real[:3]))
