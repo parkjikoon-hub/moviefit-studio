@@ -85,30 +85,61 @@ function parseTime(text) {
 }
 
 // ══ 되돌리기 ═══════════════════════════════════════════════
+// snapshot() 을 부르는 곳이 바꾸는 값은 **전부** 여기에 있어야 한다.
+// 예전에는 자막과 글자 모양만 담아서, 효과 막대·화면비·사진을 바꾼 뒤 Ctrl+Z 를 누르면
+// "되돌렸습니다"라고만 하고 아무것도 돌아오지 않았다 (2026-11-04 브라우저로 확인).
+const UNDO_FIELDS = ["segments", "style", "effects", "output", "canvas", "images", "script", "audio_path"];
+
+function undoState() {
+  const state = {};
+  for (const key of UNDO_FIELDS) {
+    if (project[key] !== undefined) state[key] = project[key];
+  }
+  return JSON.stringify(state);
+}
 function snapshot() {
   if (!project) return;
-  undoStack.push(JSON.stringify({ segments: project.segments, style: project.style }));
+  undoStack.push(undoState());
   if (undoStack.length > UNDO_MAX) undoStack.shift();
   redoStack = [];
   refreshUndoButtons();
 }
 function restore(json) {
   const data = JSON.parse(json);
-  project.segments = data.segments;
-  project.style = data.style;
-  renderAll();
+  const audioChanged = (data.audio_path ?? null) !== (project.audio_path ?? null);
+  const imagesChanged = JSON.stringify(data.images ?? null) !== JSON.stringify(project.images ?? null);
+  for (const key of UNDO_FIELDS) {
+    if (key in data) project[key] = data[key];
+    else delete project[key];
+  }
+  // 고른 효과 막대가 되돌린 뒤에 없어졌으면 고름을 푼다
+  if (fxSelectedId && !fxList().some((b) => b.id === fxSelectedId)) fxSelectedId = null;
+  if (audioChanged) {
+    renderProject();   // 음원이 바뀌면 재생기에 넣은 소리부터 다시 넣어야 한다
+  } else {
+    // 음원 없는 사진 프로젝트는 사진 길이의 합이 곧 재생 시계 길이다. 사진이 바뀌었으면
+    // 시계도 다시 만들어야 한다 (안 그러면 되돌린 셋째 사진을 미리보기로 못 본다 — 독립 검증에서 잡힘)
+    refreshPhotoStage({ reloadClock: imagesChanged && !hasOwnAudio() });
+    renderPhotoPanel();
+    $("#script-input").value = project.script || "";
+    updateScriptStats();
+    syncStyleInputs();
+    syncAspectInputs();
+    applyFrameGuide();
+    renderAll();
+  }
   markDirty();
 }
 function undo() {
   if (!undoStack.length) return;
-  redoStack.push(JSON.stringify({ segments: project.segments, style: project.style }));
+  redoStack.push(undoState());
   restore(undoStack.pop());
   refreshUndoButtons();
   toast("되돌렸습니다.");
 }
 function redo() {
   if (!redoStack.length) return;
-  undoStack.push(JSON.stringify({ segments: project.segments, style: project.style }));
+  undoStack.push(undoState());
   restore(redoStack.pop());
   refreshUndoButtons();
 }
@@ -1211,9 +1242,11 @@ function renderTimeline() {
     const speed = cps(seg);
     if (speed > 11) clip.classList.add("is-toofast");
     else if (speed > 8.5) clip.classList.add("is-warn");
+    const width = Math.max(12, (seg.end - seg.start) * pxPerSec);
     clip.style.left = seg.start * pxPerSec + "px";
-    clip.style.width = Math.max(12, (seg.end - seg.start) * pxPerSec) + "px";
-    clip.title = `${fmtTime(seg.start)} → ${fmtTime(seg.end)}\n${seg.text || "(빈 자막)"}\n끌어서 옮기고, 양 끝을 끌어 길이를 바꿉니다.`;
+    clip.style.width = width + "px";
+    clip.title = `${fmtTime(seg.start)} → ${fmtTime(seg.end)}\n${seg.text || "(빈 자막)"}\n`
+               + "끌어서 옮기고, 양 끝을 끌어 길이를 바꿉니다. 옆 자막에 닿으면 붙습니다 (Alt 를 누르면 안 붙음).";
 
     const label = document.createElement("span");
     label.textContent = seg.text || "(빈 자막)";
@@ -1222,6 +1255,7 @@ function renderTimeline() {
     const gl = document.createElement("div"); gl.className = "grip grip-l";
     const gr = document.createElement("div"); gr.className = "grip grip-r";
     clip.append(gl, gr);
+    sizeGrips(clip, width);
 
     clip.addEventListener("mousedown", (e) => startClipDrag(e, seg, clip));
     clip.addEventListener("click", (e) => { e.stopPropagation(); selectSegment(seg.id, true); scrollToSegmentRow(seg.id); });
@@ -1318,12 +1352,13 @@ function renderFxTrack() {
     el.className = "tl-fx";
     el.dataset.id = bar.id;
     if (bar.id === fxSelectedId) el.classList.add("is-active");
+    const width = Math.max(14, (bar.end - bar.start) * pxPerSec);
     el.style.left = bar.start * pxPerSec + "px";
-    el.style.width = Math.max(14, (bar.end - bar.start) * pxPerSec) + "px";
+    el.style.width = width + "px";
     const kind = fxKinds.find((k) => k.kind === bar.kind) || {};
     const strength = { low: "약하게", medium: "보통", high: "많이" }[bar.strength] || bar.strength;
     el.title = `${kind.label || bar.kind} · ${strength}\n${fmtTime(bar.start)} → ${fmtTime(bar.end)}\n`
-             + "끌어서 옮기고, 양 끝을 끌어 길이를 바꿉니다.";
+             + "끌어서 옮기고, 양 끝을 끌어 길이를 바꿉니다. 다른 막대에 닿으면 붙습니다 (Alt 를 누르면 안 붙음).";
 
     const label = document.createElement("span");
     label.textContent = kind.label || bar.kind;
@@ -1332,6 +1367,7 @@ function renderFxTrack() {
     const gl = document.createElement("div"); gl.className = "grip grip-l";
     const gr = document.createElement("div"); gr.className = "grip grip-r";
     el.append(gl, gr);
+    sizeGrips(el, width);
 
     el.addEventListener("mousedown", (e) => startFxDrag(e, bar, el));
     el.addEventListener("click", (e) => { e.stopPropagation(); fxSelectedId = bar.id; renderFxTrack(); syncFxPanel(); });
@@ -1339,48 +1375,157 @@ function renderFxTrack() {
   }
 }
 
-/** 막대를 끌어 옮기거나 길이를 바꾼다 (자막 막대와 같은 규칙). */
+/** 효과 막대를 끈다. 효과끼리는 겹쳐도 된다 (비 + 빈티지처럼 함께 거는 것이 정상이다). */
 function startFxDrag(e, bar, el) {
+  startBarDrag(e, bar, el, {
+    minLen: 0.2, minWidth: 14, lo: 0, hi: mediaDuration(),
+    onDone: () => { fxSelectedId = bar.id; renderTimelineAll(); syncFxPanel(); markDirty(); },
+  });
+}
+
+// ══ 막대 끌기 공통 (자막 · 효과) ═══════════════════════════
+//
+// 끌기는 원래 자막과 효과가 따로 갖고 있었는데, 둘 다 옆 막대에 붙지도 않고
+// 겹쳐도 말이 없었다. 규칙을 한 곳에 모아 둘이 똑같이 움직이게 한다.
+//   · 다른 막대의 양 끝, 재생 위치, 처음과 끝에 SNAP_PX 안으로 오면 착 붙는다
+//   · Alt 를 누른 채 끌면 붙지 않는다 (아주 가까이 따로 두고 싶을 때)
+//   · lo ~ hi 밖으로는 못 나간다 (자막은 이것으로 옆 자막과 겹치지 않게 한다)
+//   · 끄는 동안 시각을 말풍선으로 보여 준다
+
+const SNAP_PX = 8;   // 이 거리(화면 픽셀) 안에 들어오면 붙는다
+
+/** 재생할 영상·소리의 길이. 없으면(나레이션 작업 처음) 끝을 막지 않는다. */
+function mediaDuration() {
+  const p = $("#player");
+  return p && isFinite(p.duration) && p.duration > 0 ? p.duration : Infinity;
+}
+
+/** 막대가 붙을 수 있는 시각들 */
+function snapTargets(exceptId) {
+  const list = [0, playheadTime];
+  const end = mediaDuration();
+  if (isFinite(end)) list.push(end);
+  for (const s of segments()) if (s.id !== exceptId) list.push(s.start, s.end);
+  for (const b of fxList()) if (b.id !== exceptId) list.push(b.start, b.end);
+  return list;
+}
+
+/** t 가까이(SNAP_PX 안)에 붙을 시각이 있으면 그 시각, 없으면 null */
+function nearestSnap(t, targets) {
+  let best = null;
+  let dist = SNAP_PX / pxPerSec;
+  for (const x of targets) {
+    const d = Math.abs(x - t);
+    if (d <= dist) { dist = d; best = x; }
+  }
+  return best;
+}
+
+const round01 = (t) => Math.round(t * 10) / 10;   // 소수 셋째 자리는 위의 round3() 을 쓴다
+
+function startBarDrag(e, item, el, { minLen, minWidth, lo, hi, onDone }) {
   e.preventDefault();
   const mode = e.target.classList.contains("grip-l") ? "left"
              : e.target.classList.contains("grip-r") ? "right" : "move";
   const startX = e.clientX;
-  const orig = { start: bar.start, end: bar.end };
-  const total = totalDuration() || Infinity;
+  const orig = { start: item.start, end: item.end };
+  const span = orig.end - orig.start;
+  const targets = snapTargets(item.id);
   let moved = false;
 
+  // 붙을 자리가 있으면 붙이고, 없으면 0.1초로 반올림한다
+  const place = (t, alt) => {
+    const s = alt ? null : nearestSnap(t, targets);
+    return s === null ? { t: round01(t), snap: null } : { t: s, snap: s };
+  };
+
   const onMove = (ev) => {
-    const deltaSec = (ev.clientX - startX) / pxPerSec;
     if (Math.abs(ev.clientX - startX) > 2) moved = true;
+    if (!moved) return;
+    const delta = (ev.clientX - startX) / pxPerSec;
+    let guide = null;   // 노란 세로선을 그릴 시각 (붙었거나 옆 막대에 닿았을 때)
+
     if (mode === "move") {
-      const span = orig.end - orig.start;
-      let next = Math.round((orig.start + deltaSec) * 10) / 10;
-      next = clamp(next, 0, Math.max(0, total - span));
-      bar.start = next; bar.end = next + span;
+      // 시작과 끝 중 붙을 자리에 더 가까운 쪽을 붙인다
+      const raw = orig.start + delta;
+      const a = place(raw, ev.altKey);
+      const b = place(raw + span, ev.altKey);
+      let start;
+      if (a.snap !== null && (b.snap === null || Math.abs(a.snap - raw) <= Math.abs(b.snap - raw - span))) {
+        start = a.snap;
+      } else if (b.snap !== null) {
+        start = b.snap - span;
+      } else {
+        start = round01(raw);
+      }
+      start = clamp(start, lo, Math.max(lo, hi - span));
+      item.start = round3(start);
+      item.end = round3(start + span);
+      for (const t of [item.start, item.end]) {
+        if (targets.some((x) => Math.abs(x - t) < 1e-6) || t === lo || t === hi) guide = t;
+      }
     } else if (mode === "left") {
-      bar.start = clamp(Math.round((orig.start + deltaSec) * 10) / 10, 0, orig.end - 0.2);
+      const p = place(orig.start + delta, ev.altKey);
+      item.start = round3(clamp(p.t, lo, orig.end - minLen));
+      if (item.start === p.snap || (item.start === lo && lo > 0)) guide = item.start;
     } else {
-      bar.end = clamp(Math.round((orig.end + deltaSec) * 10) / 10, orig.start + 0.2, total);
+      const p = place(orig.end + delta, ev.altKey);
+      item.end = round3(clamp(p.t, orig.start + minLen, hi));
+      if (item.end === p.snap || item.end === hi) guide = item.end;
     }
-    el.style.left = bar.start * pxPerSec + "px";
-    el.style.width = Math.max(14, (bar.end - bar.start) * pxPerSec) + "px";
+
+    el.style.left = item.start * pxPerSec + "px";
+    el.style.width = Math.max(minWidth, (item.end - item.start) * pxPerSec) + "px";
+    showDragTip(el, item, guide);
   };
 
   const onUp = () => {
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
+    hideDragTip();
     if (!moved) return;
-    // 자막 막대와 같은 방식 — 되돌림점은 **바꾸기 전** 값으로 남긴다
-    const after = { start: bar.start, end: bar.end };
-    bar.start = orig.start; bar.end = orig.end;
+    // 되돌림점은 **바꾸기 전** 값으로 남긴다
+    const after = { start: item.start, end: item.end };
+    item.start = orig.start; item.end = orig.end;
     snapshot();
-    bar.start = after.start; bar.end = after.end;
-    fxSelectedId = bar.id;
-    renderTimelineAll(); syncFxPanel(); markDirty();
+    item.start = after.start; item.end = after.end;
+    onDone();
   };
 
   document.addEventListener("mousemove", onMove);
   document.addEventListener("mouseup", onUp);
+}
+
+/** 끄는 동안 막대 위에 "3.2초 → 6.2초 (3.0초)"를 띄우고, 붙은 자리에 세로선을 긋는다. */
+function showDragTip(el, item, guide) {
+  const tip = $("#tl-drag-tip");
+  const line = $("#tl-snap-line");
+  if (!tip) return;
+  const sec = (t) => `${(Math.round(t * 100) / 100).toFixed(2)}초`;
+  tip.textContent = `${sec(item.start)} → ${sec(item.end)} (${sec(item.end - item.start)})`
+                  + (guide !== null ? " · 붙음" : "");
+  tip.hidden = false;
+  const inner = $("#tl-inner").getBoundingClientRect();
+  const box = el.getBoundingClientRect();
+  tip.style.left = Math.max(0, box.left - inner.left) + "px";
+  tip.style.top = Math.max(0, box.top - inner.top - tip.offsetHeight - 4) + "px";
+  if (line) {
+    line.hidden = guide === null;
+    if (guide !== null) line.style.left = guide * pxPerSec + "px";
+  }
+}
+
+function hideDragTip() {
+  const tip = $("#tl-drag-tip");
+  const line = $("#tl-snap-line");
+  if (tip) tip.hidden = true;
+  if (line) line.hidden = true;
+}
+
+/** 막대가 아주 좁으면 손잡이가 막대를 다 덮어 옮길 수가 없다. 그때는 손잡이를 줄인다. */
+function sizeGrips(el, width) {
+  const w = Math.max(4, Math.min(12, Math.floor(width / 3)));
+  for (const g of el.querySelectorAll(".grip")) g.style.width = w + "px";
 }
 
 /** 고른 막대의 값을 패널에 맞춘다. */
@@ -1497,49 +1642,49 @@ function wireFxPanel() {
   loadFxKinds();
 }
 
+/** 자막 막대를 끈다. 앞 자막의 끝과 뒤 자막의 시작을 넘어가지 못한다. */
 function startClipDrag(e, seg, clip) {
-  e.preventDefault();
-  const mode = e.target.classList.contains("grip-l") ? "left"
-             : e.target.classList.contains("grip-r") ? "right" : "move";
-  const startX = e.clientX;
-  const orig = { start: seg.start, end: seg.end };
-  let moved = false;
+  const segs = segments();
+  const i = segs.indexOf(seg);
+  let lo = 0;
+  let hi = mediaDuration();
+  segs.forEach((other, j) => {
+    if (j < i) lo = Math.max(lo, other.end);
+    else if (j > i) hi = Math.min(hi, other.start);
+  });
+  // 이미 겹쳐 있던 자막은 지금 자리까지는 그대로 둔다 — 잡자마자 막대가 튀지 않게
+  lo = Math.min(lo, seg.start);
+  hi = Math.max(hi, seg.end);
+  startBarDrag(e, seg, clip, {
+    minLen: 0.1, minWidth: 12, lo, hi,
+    onDone: () => { sortSegments(); renderAll(); markDirty(); },
+  });
+}
 
-  const onMove = (ev) => {
-    const deltaSec = (ev.clientX - startX) / pxPerSec;
-    if (Math.abs(ev.clientX - startX) > 2) moved = true;
-    if (mode === "move") {
-      const shift = Math.max(-orig.start, deltaSec);
-      seg.start = Math.round((orig.start + shift) * 10) / 10;
-      seg.end = Math.round((orig.end + shift) * 10) / 10;
-    } else if (mode === "left") {
-      seg.start = clamp(Math.round((orig.start + deltaSec) * 10) / 10, 0, orig.end - 0.1);
-    } else {
-      seg.end = Math.max(orig.start + 0.1, Math.round((orig.end + deltaSec) * 10) / 10);
-    }
-    clip.style.left = seg.start * pxPerSec + "px";
-    clip.style.width = Math.max(12, (seg.end - seg.start) * pxPerSec) + "px";
-  };
+let scrubbing = false;   // 눈금·재생선을 끄는 중인가
+// 재생선이 마지막으로 그려진 시각. 재생할 파일이 없는 나레이션 작업에서는 재생기의
+// currentTime 이 0 에 머물러 있으므로, 막대를 재생 위치에 붙일 때는 이 값을 쓴다.
+let playheadTime = 0;
 
-  const onUp = () => {
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
-    if (!moved) return;
-    // 실제 변경을 확정하기 전에 원래 값으로 되돌린 스냅샷을 남긴다
-    const after = { start: seg.start, end: seg.end };
-    seg.start = orig.start; seg.end = orig.end;
-    snapshot();
-    seg.start = after.start; seg.end = after.end;
-    sortSegments(); renderAll(); markDirty();
-  };
-
-  document.addEventListener("mousemove", onMove);
-  document.addEventListener("mouseup", onUp);
+/** 타임라인에서 고른 시각으로 재생 위치를 옮긴다. */
+function seekTimeline(time) {
+  const p = $("#player");
+  const t = Math.max(0, time);
+  if (p.src) {
+    p.currentTime = clamp(t, 0, p.duration || t);
+    updatePlayhead(p.currentTime);
+  } else {
+    updatePlayhead(t);
+  }
 }
 
 function updatePlayhead(time) {
+  playheadTime = time;
   const head = $("#tl-playhead");
   head.style.left = time * pxPerSec + "px";
+
+  // 끄는 중에는 화면을 넘기지 않는다. 넘기면 마우스 아래 시각이 바뀌어 재생 위치가 달아난다.
+  if (scrubbing) return;
 
   // 재생 위치가 화면 밖으로 나가면 따라간다
   const scroll = $("#tl-scroll");
@@ -2144,7 +2289,8 @@ const HELP_TEXT = {
 function setHelp(kind) { $("#help-bar").textContent = HELP_TEXT[kind] || HELP_TEXT.idle; }
 
 // ══ 처음 한 번만 보여주는 사용법 ═══════════════════════════
-const COACH_KEY = "moviefit.coach.v1";
+// v2 (2026-11-04): 막대 끌기를 안내에 넣었다. 예전 안내를 닫은 사람에게도 한 번 더 보이도록 이름을 바꿨다.
+const COACH_KEY = "moviefit.coach.v2";
 function maybeShowCoach() {
   if (localStorage.getItem(COACH_KEY) === "done") return;
   $("#coach").hidden = false;
@@ -2348,14 +2494,43 @@ function wireEditor() {
   $("#tl-zoom-in").addEventListener("click", () => setZoom(pxPerSec * 1.5));
   $("#tl-zoom-out").addEventListener("click", () => setZoom(pxPerSec / 1.5));
   $("#tl-zoom-fit").addEventListener("click", zoomFit);
-  $("#tl-track").addEventListener("click", (e) => {
-    if (e.target.closest(".tl-clip")) return;
-    const rect = $("#tl-inner").getBoundingClientRect();
-    const time = (e.clientX - rect.left) / pxPerSec;
-    const p = $("#player");
-    if (p.src) p.currentTime = clamp(time, 0, p.duration || time);
-    else updatePlayhead(Math.max(0, time));
+
+  // 재생 위치 옮기기 — 눈금 줄, 재생선 머리, 막대가 없는 빈 곳 어디든 누르거나 끌면 된다.
+  // (예전에는 자막 줄의 빈 곳만 눌렸고, 눈금을 눌러도 아무 일이 없었다.)
+  $("#tl-inner").addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest(".tl-clip, .tl-fx")) return;   // 막대는 막대 끌기가 맡는다
+    e.preventDefault();
+    const seekAt = (clientX) => {
+      const rect = $("#tl-inner").getBoundingClientRect();
+      seekTimeline((clientX - rect.left) / pxPerSec);
+    };
+    scrubbing = true;
+    seekAt(e.clientX);
+    const onMove = (ev) => seekAt(ev.clientX);
+    const onUp = () => {
+      scrubbing = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   });
+
+  // Ctrl + 휠 = 확대·축소 (마우스 아래 시각을 제자리에 둔다). 그냥 휠 = 옆으로 밀기.
+  $("#tl-scroll").addEventListener("wheel", (e) => {
+    const scroll = $("#tl-scroll");
+    if (e.ctrlKey) {
+      e.preventDefault();   // 안 막으면 브라우저가 화면 전체를 확대한다
+      const t = (e.clientX - $("#tl-inner").getBoundingClientRect().left) / pxPerSec;
+      const offset = e.clientX - scroll.getBoundingClientRect().left;
+      setZoom(pxPerSec * (e.deltaY < 0 ? 1.25 : 1 / 1.25));
+      scroll.scrollLeft = Math.max(0, t * pxPerSec - offset);
+    } else if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault();
+      scroll.scrollLeft += e.deltaY;
+    }
+  }, { passive: false });
 
   // 플레이어
   const player = $("#player");
@@ -2429,10 +2604,14 @@ function wireEditor() {
   window.addEventListener("beforeunload", () => {
     if (saveTimer && project) {
       clearTimeout(saveTimer);
-      navigator.sendBeacon(
-        `/api/projects/${encodeURIComponent(project.id)}`,
-        new Blob([JSON.stringify(project)], { type: "application/json" })
-      );
+      // sendBeacon 은 POST 로만 보내는데 서버의 저장 길은 PUT 이라 405 로 거절됐다.
+      // 그래서 창을 닫기 직전 2초 안에 고친 것이 사라졌다 (2026-11-04 독립 검증에서 잡힘).
+      // keepalive 를 켠 fetch 는 창이 닫혀도 끝까지 간다. 단 64KB 를 넘으면 브라우저가 거절한다.
+      fetch(`/api/projects/${encodeURIComponent(project.id)}`, {
+        method: "PUT", keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(project),
+      }).catch(() => {});
     }
   });
 }
@@ -2896,10 +3075,12 @@ function wireProgressBox() {
 // ══ 패널 크기 조절 ═════════════════════════════════════════
 const LAYOUT_KEY = "moviefit.layout.v1";
 // 영상 띠(36px)가 눈금 아래에 한 줄 더 들어가므로 기본 높이를 그만큼 키웠다.
-const LAYOUT_DEFAULT = { left: 250, right: 300, bottom: 310, timeline: 134 };
+const LAYOUT_DEFAULT = { left: 250, right: 300, bottom: 310, timeline: 156 };
 // 영상 띠를 켤 때 이보다 낮으면 자막 막대가 들어갈 자리가 없다.
-// (눈금 22 + 띠 36 = 58, 자막 막대 51 → 109. 여유를 두어 134)
-const TIMELINE_MIN_WITH_FILM = 134;
+// 눈금 22 + 띠 36 + 효과 띠 34 = 92. 자막 막대는 줄 높이에서 위아래 6px 씩 뺀 만큼이라
+// 156 이면 자막 줄 64 · 막대 52px 이 된다. (예전 값 134 는 효과 띠를 빼먹은 계산이라
+// 막대가 효과 띠 위로 삐져나왔다.) 134 로 저장해 둔 사람도 이 값으로 올라간다.
+const TIMELINE_MIN_WITH_FILM = 156;
 
 function applyLayout(layout) {
   const root = $("#view-editor");

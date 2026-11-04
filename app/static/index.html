@@ -9,7 +9,10 @@
 <link rel="icon" href="/icons/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="/icons/icon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="/icons/icon-180.png">
-<link rel="stylesheet" href="/style.css">
+<!-- 주소 끝 ?v= : v0.6.0 까지는 서버가 "매번 확인하라" 표시를 안 붙여서 브라우저가 옛 파일을
+     며칠씩 기억했다. 주소를 한 번 바꿔 그 기억을 버리게 한다. 이제 서버가 표시를 붙이므로
+     (app/server.py NoCacheStaticFiles) 앞으로 판을 올릴 때마다 바꿀 필요는 없다. -->
+<link rel="stylesheet" href="/style.css?v=20261104">
 </head>
 <body>
 
@@ -638,7 +641,13 @@
           <!-- 화면 효과 막대. 자막 띠 바로 아래에 한 줄 더 둔다 -->
           <div id="tl-fx-track" class="tl-fx-track"></div>
           <div id="tl-ab" class="tl-ab" hidden></div>
-          <div id="tl-playhead" class="tl-playhead"></div>
+          <!-- 막대를 끄는 동안만 보인다: 붙은 자리의 세로선과 시각 말풍선 -->
+          <div id="tl-snap-line" class="tl-snap-line" hidden></div>
+          <div id="tl-drag-tip" class="tl-drag-tip" hidden></div>
+          <div id="tl-playhead" class="tl-playhead">
+            <!-- 선 자체는 마우스를 받지 않는다 (밑의 막대를 가리지 않게). 머리만 잡을 수 있다 -->
+            <div class="tl-playhead-grip" title="끌어서 재생 위치를 옮깁니다"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -685,7 +694,7 @@
     <h3>편집기 사용법 — 30초면 끝납니다</h3>
     <ol class="coach-list">
       <li><b>글자 고치기</b> — 자막 글을 그냥 클릭하면 바로 수정됩니다. Enter로 확정.</li>
-      <li><b>시간 조절</b> — 시작·끝 시간 옆의 <span class="kbd">◀</span><span class="kbd">▶</span> 버튼이 0.1초씩 옮깁니다. 숫자를 클릭하면 직접 입력할 수 있습니다.</li>
+      <li><b>시간 조절</b> — 아래 타임라인의 자막 막대를 끌어 옮기고, 막대의 양 끝을 끌어 늘이거나 줄입니다. 옆 자막에 닿으면 붙습니다. 0.1초씩 맞출 때는 목록의 <span class="kbd">◀</span><span class="kbd">▶</span> 버튼을 쓰고, 숫자를 클릭하면 직접 입력할 수 있습니다.</li>
       <li><b>나누기·합치기</b> — 글 중간에 커서를 두고 <span class="kbd">나누기</span>를 누르면 두 개로 쪼개집니다. <span class="kbd">합치기</span>는 다음 자막과 붙입니다.</li>
       <li><b>실수해도 괜찮습니다</b> — 위의 <span class="kbd">↶ 되돌리기</span> 버튼으로 언제든 되돌릴 수 있습니다.</li>
     </ol>
@@ -708,6 +717,8 @@
       <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">Y</span></td><td>다시하기</td></tr>
       <tr><td><span class="kbd">Ctrl</span>+<span class="kbd">F</span></td><td>자막 검색</td></tr>
       <tr><td><span class="kbd">Delete</span></td><td>선택한 자막 삭제</td></tr>
+      <tr><td><span class="kbd">Ctrl</span>+휠</td><td>타임라인 확대 / 축소 (그냥 휠은 옆으로 밀기)</td></tr>
+      <tr><td><span class="kbd">Alt</span>+막대 끌기</td><td>옆 막대에 붙지 않게 끌기</td></tr>
     </table>
     <button id="shortcuts-close" class="btn btn-primary btn-wide">닫기</button>
   </div>
@@ -781,6 +792,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="/app.js"></script>
+<script src="/app.js?v=20261104"></script>
 </body>
 </html>

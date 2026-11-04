@@ -28,6 +28,21 @@ log = logging.getLogger("moviefit_studio")
 # 브라우저가 폰트를 거부하고 화면이 기본 글꼴로 나온다.
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("font/woff", ".woff")
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """화면 파일에 '쓰기 전에 매번 서버에 확인하라(no-cache)' 표시를 붙인다.
+
+    표시가 없으면 브라우저는 파일 날짜만 보고 "며칠은 그냥 써도 된다"고 스스로 정해
+    서버에 묻지도 않는다. 그러면 새 판을 설치해도 옛 화면이 며칠씩 나온다
+    (2026-11-04 개발 컴퓨터의 크롬에서 실제로 겪었다). 확인 요청은 바뀌지 않았으면
+    '그대로(304)'라는 짧은 답만 받으므로 느려지지 않는다.
+    """
+
+    def file_response(self, *args: Any, **kwargs: Any):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
@@ -81,7 +96,7 @@ def create_app() -> FastAPI:
         return FileResponse(STATIC_DIR / "icons" / "icon-192.png", media_type="image/png")
 
     # 나머지 모든 경로는 화면 파일. 반드시 맨 마지막에 등록해야 위 라우트를 가리지 않는다.
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+    app.mount("/", NoCacheStaticFiles(directory=STATIC_DIR, html=True), name="static")
 
     return app
 

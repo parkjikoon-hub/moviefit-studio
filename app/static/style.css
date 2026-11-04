@@ -741,8 +741,9 @@ body.is-resizing .splitter { pointer-events: auto; }
 }
 .tl-fx:hover { filter: brightness(1.15); }
 .tl-fx.is-active { background: rgba(96,165,250,.55); box-shadow: 0 0 0 2px rgba(147,197,253,.45); }
-.tl-fx .grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.tl-fx .grip { position: absolute; top: 0; bottom: 0; width: 12px; cursor: ew-resize; }
 .tl-fx .grip-l { left: 0; } .tl-fx .grip-r { right: 0; }
+.tl-fx:hover .grip { background: rgba(219,234,254,.30); }
 
 /* 화면 효과 패널 */
 .fx-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -765,8 +766,10 @@ body.is-resizing .splitter { pointer-events: auto; }
 /* A-B 구간 반복 표시 */
 .tl-ab { position: absolute; top: 22px; bottom: 0; background: rgba(251,191,36,.16); border-left: 2px solid var(--warn); border-right: 2px solid var(--warn); pointer-events: none; z-index: 2; }
 
+/* 막대 높이는 자막 줄 높이를 따라간다. 타임라인 아래 손잡이로 줄을 키우면 막대도 커져
+   잡기 쉬워진다 (예전에는 40px 고정이라 줄을 키워도 빈 자리만 늘었다). */
 .tl-clip {
-  position: absolute; top: 11px; height: 40px;
+  position: absolute; top: 6px; height: calc(100% - 12px); min-height: 30px; max-height: 96px;
   background: var(--accent-dk); border: 1px solid var(--accent);
   border-radius: 2px; overflow: hidden; cursor: grab;
   display: flex; align-items: center; padding: 0 6px;
@@ -779,12 +782,24 @@ body.is-resizing .splitter { pointer-events: auto; }
 .tl-clip.is-warn { background: var(--warn); border-color: #FCD34D; color: #3B2A00; }
 .tl-clip.is-toofast { background: var(--danger); border-color: #FCA5A5; color: #3B0A0A; }
 .tl-clip .grip {
-  position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; background: rgba(0,0,0,.22);
+  position: absolute; top: 0; bottom: 0; width: 12px; cursor: ew-resize; background: rgba(0,0,0,.22);
 }
 .tl-clip .grip-l { left: 0; } .tl-clip .grip-r { right: 0; }
+/* 마우스를 올리면 양 끝이 밝아져 "여기를 잡으면 길이가 바뀐다"를 알린다 */
+.tl-clip:hover .grip { background: rgba(255,255,255,.45); }
+
+/* 끄는 동안만 보이는 것들 */
+.tl-snap-line { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid #FACC15;
+  pointer-events: none; z-index: 5; }
+.tl-drag-tip { position: absolute; z-index: 6; pointer-events: none; white-space: nowrap;
+  padding: 3px 7px; border-radius: 3px; font-size: 12px; font-weight: 600;
+  background: #111; color: #FDE68A; border: 1px solid #FACC15; font-variant-numeric: tabular-nums; }
 
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #FF5A5A; pointer-events: none; z-index: 3; }
 .tl-playhead::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: #FF5A5A; }
+/* 재생선 머리 — 눈금 줄 높이만큼만 잡을 수 있다. 선 전체를 잡게 하면 밑의 막대를 못 누른다 */
+.tl-playhead-grip { position: absolute; top: 0; left: -7px; width: 16px; height: 22px;
+  pointer-events: auto; cursor: ew-resize; }
 
 .tl-empty { position: absolute; inset: 22px 0 0 0; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 13.5px; }
 
