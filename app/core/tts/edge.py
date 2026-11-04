@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import re
 from typing import Any
@@ -35,6 +36,18 @@ _KOREAN_LABELS = {
 
 # 언어 이름표는 base.py 한 곳에서만 관리한다 (두 벌로 갈라지면 한쪽만 늘어난다)
 _LOCALE_NAMES = LANGUAGE_NAMES
+
+# 서버가 "잠시 이용할 수 없음"(500번대)을 돌려주면 이만큼 쉬었다가 다시 묻는다.
+# 2026-11-04 점검 중 503 이 이따금 왔고 바로 다음 요청은 성공했다. 나레이션은 문장마다
+# 따로 물으므로, 한 번에 포기하면 긴 대본일수록 끝까지 가기 어렵다.
+RETRY_DELAYS = (1.0, 2.0)
+
+
+def _server_status(exc: Exception | None) -> int | None:
+    """서버가 돌려준 거절 번호(403·503 등). 서버에 닿지도 못했으면 None.
+    aiohttp 의 WSServerHandshakeError 가 status 를 들고 온다."""
+    status = getattr(exc, "status", None)
+    return status if isinstance(status, int) else None
 
 
 def _pretty_name(short_name: str) -> str:
@@ -141,7 +154,25 @@ class EdgeTTSEngine(TTSEngine):
         (NoAudioReceived). 전에는 이것까지 "인터넷 연결을 확인하세요"로 안내해서,
         인터넷이 멀쩡한 사람이 될 때까지 다시 누르게 만들었다.
         """
+        status = _server_status(exc)
         detail = f"(상세: {type(exc).__name__})" if exc is not None else "(상세: 소리가 비어 있음)"
+        if status is not None:
+            detail = f"(상세: {type(exc).__name__} {status})"
+
+        # 서버가 대답은 했다 = 인터넷은 멀쩡하다. 여기서 인터넷을 탓하면 사용자는 계속 다시 누른다.
+        if status == 403:
+            return (
+                "마이크로소프트 음성 서버가 접속을 거절했습니다. 프로그램에 든 음성 부품이 낡으면 "
+                "이렇게 됩니다. 소개 사이트에서 새 판을 받아 설치해 주세요. "
+                "(컴퓨터 시계가 크게 틀려도 이럴 수 있습니다)\n"
+                f"{detail}"
+            )
+        if status is not None and status >= 500:
+            return (
+                "마이크로소프트 음성 서버가 지금 응답하지 않습니다. 세 번 시도했지만 되지 않았습니다. "
+                "몇 분 뒤 다시 눌러 주세요.\n"
+                f"{detail}"
+            )
 
         if has_hangul(text) and not _speaks_korean(voice):
             lang = language_name(language_of(voice))
@@ -172,16 +203,22 @@ class EdgeTTSEngine(TTSEngine):
 
         import edge_tts
 
-        try:
-            communicate = edge_tts.Communicate(
-                text, voice, rate=rate, pitch=pitch, volume=volume
-            )
-            buffer = io.BytesIO()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    buffer.write(chunk["data"])
-        except Exception as exc:
-            raise TTSError(self._explain_failure(exc, text, voice)) from exc
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            try:
+                communicate = edge_tts.Communicate(
+                    text, voice, rate=rate, pitch=pitch, volume=volume
+                )
+                buffer = io.BytesIO()
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        buffer.write(chunk["data"])
+                break
+            except Exception as exc:
+                status = _server_status(exc)
+                if status is not None and status >= 500 and attempt < len(RETRY_DELAYS):
+                    await asyncio.sleep(RETRY_DELAYS[attempt])
+                    continue
+                raise TTSError(self._explain_failure(exc, text, voice)) from exc
 
         audio = buffer.getvalue()
         if not audio:

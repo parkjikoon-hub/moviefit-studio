@@ -156,6 +156,81 @@ try:
 except Exception as exc:  # 목록 실패는 위 항목들과 별개로 표시한다
     check("목소리 목록을 받아온다", False, f"{type(exc).__name__}")
 
+# ── ⑤ 음성 서버가 거절할 때 — 다시 시도하는가, 원인을 바로 말하는가 ──
+# 2026-11-04 배포 전 점검에서 마이크로소프트 서버가 한 번 503(잠시 이용할 수 없음)을
+# 돌려줘 나레이션 전체가 멈췄다. 직후에는 정상이었다. 문장이 많을수록 이런 순간을
+# 만날 확률이 커지는데, 전에는 한 번에 포기하고 "인터넷 연결을 확인하세요"라고 했다.
+# 진짜 서버가 실패해 주길 기다릴 수는 없으므로, 앞의 몇 번만 거절하는 가짜를 끼운다.
+print("\n⑤ 음성 서버가 거절하면 다시 시도하고, 원인을 바로 말하는가\n")
+
+import asyncio  # noqa: E402
+
+import edge_tts  # noqa: E402
+
+from app.core.tts import edge as edge_module  # noqa: E402
+from app.core.tts import get_engine  # noqa: E402
+from app.core.tts.base import TTSError  # noqa: E402
+
+
+class _Refused(Exception):
+    """aiohttp 의 WSServerHandshakeError 처럼 status 를 들고 있는 거절."""
+
+    def __init__(self, status: int):
+        super().__init__(f"{status}, message='Invalid response status'")
+        self.status = status
+
+
+_REAL_COMMUNICATE = edge_tts.Communicate
+
+
+def _try_with_refusals(times: int, error: Exception) -> tuple[str, int, float]:
+    """앞의 times 번은 error 로 거절하고, 그 뒤로는 진짜 서버에 묻는다.
+    돌려주는 것: (결과 — 'ok' 또는 안내 문구, 서버에 물은 횟수, 소리 길이)"""
+    calls = {"n": 0}
+
+    class FakeCommunicate:
+        def __init__(self, *args, **kwargs):
+            self._args, self._kwargs = args, kwargs
+
+        async def stream(self):
+            calls["n"] += 1
+            if calls["n"] <= times:
+                raise error
+            async for chunk in _REAL_COMMUNICATE(*self._args, **self._kwargs).stream():
+                yield chunk
+
+    edge_tts.Communicate = FakeCommunicate
+    saved_delays = getattr(edge_module, "RETRY_DELAYS", ())
+    edge_module.RETRY_DELAYS = tuple(0.0 for _ in saved_delays)  # 점검은 기다리지 않는다
+    try:
+        result = asyncio.run(get_engine("edge").synthesize("안녕하세요. 시험입니다.", "ko-KR-SunHiNeural"))
+        return "ok", calls["n"], result.duration
+    except TTSError as exc:
+        return str(exc), calls["n"], 0.0
+    finally:
+        edge_tts.Communicate = _REAL_COMMUNICATE
+        edge_module.RETRY_DELAYS = saved_delays
+
+
+out, n, dur = _try_with_refusals(2, _Refused(503))
+check("503 이 두 번 와도 세 번째에 성공한다", out == "ok" and dur > 0.3, f"{n}번 물음 · {dur:.2f}초 · {out[:40]}")
+check("성공할 때까지 정확히 세 번 물었다", n == 3, f"{n}번")
+
+out, n, _ = _try_with_refusals(99, _Refused(503))
+check("503 이 계속되면 세 번에서 멈춘다", n == 3, f"{n}번")
+check("계속되는 503 → '음성 서버' 탓이라고 말한다", "음성 서버" in out, out[:70])
+check("계속되는 503 → 엉뚱하게 '인터넷'을 탓하지 않는다", "인터넷" not in out, out[:70])
+check("계속되는 503 → 안내의 첫 글자가 한글이다", bool(out) and "가" <= out[0] <= "힣", out[:20])
+
+out, n, _ = _try_with_refusals(99, _Refused(403))
+check("403(판이 낡아 거절) → 다시 묻지 않는다", n == 1, f"{n}번")
+check("403 → 새 판을 받으라고 말한다", "새 판" in out, out[:70])
+check("403 → 엉뚱하게 '인터넷'을 탓하지 않는다", "인터넷" not in out, out[:70])
+
+out, n, _ = _try_with_refusals(99, OSError("연결 실패"))
+check("서버에 닿지도 못하면 → 다시 묻지 않는다", n == 1, f"{n}번")
+check("서버에 닿지도 못하면 → 그때는 '인터넷'을 확인하라고 한다", "인터넷" in out, out[:70])
+
 # ── 정리 ─────────────────────────────────────────────────
 print("\n" + "=" * 60)
 print(f"통과 {len(passed)}개 / 실패 {len(failed)}개  (겨냥한 서버: {BASE})")
